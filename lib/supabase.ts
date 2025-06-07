@@ -23,7 +23,8 @@ export function createServerSupabaseClient() {
 // Modificar la función createServerSupabaseClientWithCookies para que acepte cookies como parámetro
 export function createServerSupabaseClientWithCookies(cookieStore?: any) {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const supabaseKey = process.env.SUPABASE_ANON_KEY
+  // Use the same anon key as the client to avoid missing env vars in production
+  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 
   if (!supabaseUrl || !supabaseKey) {
     throw new Error("Faltan las variables de entorno de Supabase")
