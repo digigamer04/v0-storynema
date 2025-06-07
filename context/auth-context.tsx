@@ -1,7 +1,10 @@
 "use client"
 
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react"
-import { createClientSupabaseClient } from "@/lib/supabase"
+import {
+  createClientSupabaseClient,
+  createClientSupabaseClientWithCookies,
+} from "@/lib/supabase"
 import type { User } from "@supabase/supabase-js"
 
 type AuthContextType = {
@@ -21,7 +24,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<Error | null>(null)
 
   // Inicializar cliente de Supabase una vez
-  const supabase = createClientSupabaseClient()
+  const supabase = createClientSupabaseClientWithCookies()
 
   useEffect(() => {
     // Verificar si hay una sesión activa
