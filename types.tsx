@@ -6,6 +6,7 @@ export interface Scene {
   order_index: number
   created_at?: string
   updated_at?: string
+  is_temporary?: boolean
 }
 
 export interface ScriptScene {

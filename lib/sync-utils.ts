@@ -186,38 +186,3 @@ export function convertStoryboardSceneToScript(storyboardScene: any, existingScr
     is_temporary: true,
   }
 }
-
-/**
- * Verifica y corrige rutas incorrectas
- * @param path Ruta a verificar
- * @returns Ruta corregida
- */
-export function validateRoutePath(path: string): string {
-  // Corregir rutas conocidas con problemas
-  if (path === "/projects-manage") {
-    return "/projects/manage"
-  }
-
-  // Eliminar parámetros RSC que pueden causar problemas
-  if (path.includes("?_rsc=")) {
-    return path.split("?_rsc=")[0]
-  }
-
-  return path
-}
-
-/**
- * Función para manejar navegaciones seguras
- * @param router Router de Next.js
- * @param path Ruta a la que navegar
- */
-export function safeNavigate(router: any, path: string): void {
-  const correctedPath = validateRoutePath(path)
-
-  // Verificar si la ruta es válida antes de navegar
-  if (correctedPath.startsWith("/")) {
-    router.push(correctedPath)
-  } else {
-    console.error(`Intento de navegación a ruta inválida: ${path}`)
-  }
-}

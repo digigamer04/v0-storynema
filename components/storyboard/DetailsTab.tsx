@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import { useState, useEffect } from "react"
+import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
@@ -9,9 +9,6 @@ import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { Upload, Trash2, Music } from "lucide-react"
 import type { StoryboardScene, StoryboardImage, AudioTrack } from "./types"
-
-// Importar el nuevo sistema de gestión de descripciones
-import { saveDescription, getDescriptionWithFallback, DescriptionType } from "@/lib/description-manager"
 
 interface DetailsTabProps {
   activeScene: StoryboardScene
@@ -54,62 +51,16 @@ export function DetailsTab({
   onToggleShowControls,
   onToggleAutoSync,
 }: DetailsTabProps) {
-  // Obtener la descripción con fallback
-  const [description, setDescription] = useState("")
+  const [description, setDescription] = useState(imageDescriptions[activeImage?.id] || activeImage?.description || "")
+
   const [duration, setDuration] = useState(activeImage?.duration?.toString() || "3")
-
-  // Actualizar la descripción cuando cambia la imagen activa
-  useEffect(() => {
-    if (activeImage?.id) {
-      // Intentar obtener la descripción del estado local primero
-      const localDescription = imageDescriptions[activeImage.id]
-
-      // Si existe en el estado local, usarla
-      if (localDescription) {
-        console.log(
-          `Usando descripción del estado local para ${activeImage.id}: ${localDescription.substring(0, 30)}...`,
-        )
-        setDescription(localDescription)
-        return
-      }
-
-      // Si no, intentar obtenerla del sistema de gestión con fallback a la estructura
-      const newDescription = getDescriptionWithFallback(
-        projectId,
-        DescriptionType.IMAGE,
-        activeImage.id,
-        activeImage.description || "",
-      )
-
-      console.log(`Obtenida descripción para ${activeImage.id}: ${newDescription.substring(0, 30)}...`)
-      setDescription(newDescription)
-    } else {
-      setDescription("")
-    }
-  }, [activeImage?.id, projectId, activeImage?.description, imageDescriptions])
-
-  // Actualizar la duración cuando cambia la imagen activa
-  useEffect(() => {
-    if (activeImage?.duration) {
-      setDuration(activeImage.duration.toString())
-    } else {
-      setDuration("3")
-    }
-  }, [activeImage?.duration])
 
   const handleDescriptionChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setDescription(e.target.value)
   }
 
   const handleDescriptionBlur = () => {
-    // Guardar directamente en el sistema de gestión de descripciones
-    if (activeImage?.id) {
-      console.log(`Guardando descripción en blur para ${activeImage.id}: ${description.substring(0, 30)}...`)
-      saveDescription(projectId, DescriptionType.IMAGE, activeImage.id, description)
-
-      // Notificar al componente padre
-      onUpdateImageDescription(description)
-    }
+    onUpdateImageDescription(description)
   }
 
   const handleDurationChange = (e: React.ChangeEvent<HTMLInputElement>) => {

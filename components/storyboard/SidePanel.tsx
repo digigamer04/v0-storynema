@@ -96,27 +96,15 @@ export function SidePanel({
         }`}
       >
         <Card className="h-full shadow-lg">
-          <CardContent className="p-0 h-full">
-            <Tabs defaultValue="details" className="h-full flex flex-col">
+          <CardContent className="p-0">
+            <Tabs defaultValue="details" className="h-full">
               <TabsList className="grid grid-cols-3 w-full">
                 <TabsTrigger value="details">Detalles</TabsTrigger>
                 <TabsTrigger value="camera">Cámara</TabsTrigger>
                 <TabsTrigger value="production">Producción</TabsTrigger>
               </TabsList>
 
-              <style jsx global>{`
-                .tabs-content-scroll::-webkit-scrollbar {
-                  width: 0px;
-                  background: transparent;
-                }
-                
-                .tabs-content-scroll {
-                  scrollbar-width: none;
-                  -ms-overflow-style: none;
-                }
-              `}</style>
-
-              <TabsContent value="details" className="p-4 overflow-y-auto flex-grow tabs-content-scroll">
+              <TabsContent value="details" className="p-4">
                 <div className="space-y-4">
                   {/* Información de la escena */}
                   <div>
@@ -133,11 +121,13 @@ export function SidePanel({
 
                   <div>
                     <Label className="text-gray-300">Descripción de la escena</Label>
-                    <div className="h-20 bg-[#2A2A2A] border border-[#444444] text-gray-200 rounded-md p-2 overflow-auto text-sm">
-                      {activeScene?.description || (
-                        <span className="text-gray-500 italic">No hay descripción disponible</span>
-                      )}
-                    </div>
+                    <Textarea
+                      id="scene-description"
+                      value={activeScene?.description || ""}
+                      onChange={(e) => onUpdateSceneDescription && onUpdateSceneDescription(e.target.value)}
+                      placeholder="Añade una descripción para esta escena"
+                      className="h-20 bg-[#2A2A2A] border-[#444444] text-gray-200"
+                    />
                   </div>
 
                   {/* Descripción de la imagen */}
@@ -280,7 +270,7 @@ export function SidePanel({
                 </div>
               </TabsContent>
 
-              <TabsContent value="camera" className="p-4 overflow-y-auto flex-grow tabs-content-scroll">
+              <TabsContent value="camera" className="p-4">
                 <CameraTab
                   activeImage={activeImage}
                   favoriteCameras={favoriteCameras}
@@ -293,7 +283,7 @@ export function SidePanel({
                 />
               </TabsContent>
 
-              <TabsContent value="production" className="p-4 overflow-y-auto flex-grow tabs-content-scroll">
+              <TabsContent value="production" className="p-4">
                 <ProductionTab activeScene={activeScene} onUpdateSceneMetadata={onUpdateSceneMetadata} />
               </TabsContent>
             </Tabs>

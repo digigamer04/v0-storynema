@@ -108,57 +108,22 @@ export function TimelineContainer({
     const handleTimeUpdate = () => {
       const newAudioTime = audioElement.currentTime
       setAudioCurrentTime(newAudioTime)
-
-      // Usar la grid de tiempo para una conversión más precisa
+      const ratio = totalShotsDuration / audioDuration
+      // Sincronizar el tiempo de las tomas con el tiempo de audio
       if (totalShotsDuration > 0) {
-        // Convertir tiempo de audio a puntos de grid
-        const audioTimeInGridPoints = TimelineGrid.secondsToGridPoints(newAudioTime)
-        const audioDurationInGridPoints = TimelineGrid.secondsToGridPoints(audioDuration)
-
-        // Calcular la proporción con precisión de grid
-        const ratio = TimelineGrid.secondsToGridPoints(totalShotsDuration) / audioDurationInGridPoints
-
-        // Convertir a tiempo de toma con precisión de grid
-        const mappedShotTimeInGridPoints = audioTimeInGridPoints * ratio
-        const mappedShotTime = TimelineGrid.gridPointsToSeconds(mappedShotTimeInGridPoints)
-
-        // Actualizar el tiempo actual con precisión de grid
+        const mappedShotTime = newAudioTime * ratio
         timelineGrid.setCurrentTime(mappedShotTime)
 
-        // Encontrar la toma correspondiente a este tiempo con mayor precisión
+        // Encontrar la toma correspondiente a este tiempo
         let accumulatedTime = 0
-        let foundActiveShot = false
-
         for (let i = 0; i < activeScene.images.length; i++) {
-          const shotDuration = activeScene.images[i]?.duration || 0
-          const nextAccumulatedTime = accumulatedTime + shotDuration
-
-          // Usar puntos de grid para comparación más precisa
-          const accTimeInGridPoints = TimelineGrid.secondsToGridPoints(accumulatedTime)
-          const nextAccTimeInGridPoints = TimelineGrid.secondsToGridPoints(nextAccumulatedTime)
-
-          if (
-            mappedShotTimeInGridPoints >= accTimeInGridPoints &&
-            mappedShotTimeInGridPoints < nextAccTimeInGridPoints
-          ) {
+          accumulatedTime += activeScene.images[i]?.duration || 0
+          if (mappedShotTime <= accumulatedTime) {
             if (i !== activeImageIndex) {
               setActiveImage(activeSceneIndex, i)
             }
-            foundActiveShot = true
             break
           }
-
-          accumulatedTime = nextAccumulatedTime
-        }
-
-        // Si no se encontró una toma activa y estamos al final, seleccionar la última
-        if (
-          !foundActiveShot &&
-          activeScene.images.length > 0 &&
-          mappedShotTime >= accumulatedTime &&
-          activeImageIndex !== activeScene.images.length - 1
-        ) {
-          setActiveImage(activeSceneIndex, activeScene.images.length - 1)
         }
       }
 

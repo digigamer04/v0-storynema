@@ -51,43 +51,25 @@ class StateManager {
     if (typeof window === "undefined" || !this.persistenceEnabled) return
 
     try {
-      // Usar un enfoque más robusto para guardar el estado
-      const stateToSave = JSON.stringify(this.state)
-      const currentState = localStorage.getItem("storynema_global_state")
-
-      // Solo guardar si hay cambios reales para evitar loops
-      if (stateToSave !== currentState) {
-        localStorage.setItem("storynema_global_state", stateToSave)
-      }
+      localStorage.setItem("storynema_global_state", JSON.stringify(this.state))
     } catch (error) {
       console.error("Error al guardar el estado en localStorage:", error)
-      // Intentar limpiar el almacenamiento si está lleno
-      try {
-        localStorage.removeItem("storynema_global_state")
-        localStorage.setItem("storynema_global_state", JSON.stringify({}))
-      } catch (e) {
-        console.error("No se pudo recuperar del error de almacenamiento:", e)
-      }
     }
   }
 
   // Manejar cambios en localStorage desde otras pestañas
   private handleStorageChange = (event: StorageEvent): void => {
-    if (event.key === "storynema_global_state" && event.newValue && event.newValue !== event.oldValue) {
+    if (event.key === "storynema_global_state" && event.newValue) {
       try {
         const newState = JSON.parse(event.newValue)
+        this.state = newState
 
-        // Verificar si el estado es diferente antes de actualizar
-        if (JSON.stringify(this.state) !== event.newValue) {
-          this.state = newState
-
-          // Notificar a todos los listeners sobre el cambio
-          Object.keys(this.listeners).forEach((key) => {
-            if (this.state[key] !== undefined) {
-              this.listeners[key].forEach((listener) => listener(this.state[key]))
-            }
-          })
-        }
+        // Notificar a todos los listeners sobre el cambio
+        Object.keys(this.listeners).forEach((key) => {
+          if (this.state[key] !== undefined) {
+            this.listeners[key].forEach((listener) => listener(this.state[key]))
+          }
+        })
       } catch (error) {
         console.error("Error al procesar cambios de almacenamiento:", error)
       }

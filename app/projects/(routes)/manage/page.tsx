@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { ArrowLeft, Loader2 } from "lucide-react"
 import Link from "next/link"
@@ -13,34 +13,26 @@ export default function ManageProjectsPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  // Usar useCallback para evitar recreaciones innecesarias de la función
-  const loadUser = useCallback(async () => {
-    try {
-      if (userId) return // Evitar cargar si ya tenemos un userId
-
-      setIsLoading(true)
-      const user = await getUserClient()
-      if (user) {
-        setUserId(user.id)
-      } else {
-        setError("You must be logged in to manage projects")
-      }
-    } catch (err) {
-      console.error("Error loading user:", err)
-      setError("Error loading user information")
-    } finally {
-      setIsLoading(false)
-    }
-  }, [userId])
-
   useEffect(() => {
-    loadUser()
-
-    // Limpiar estado al desmontar para evitar memory leaks
-    return () => {
-      setIsLoading(false)
+    const loadUser = async () => {
+      try {
+        setIsLoading(true)
+        const user = await getUserClient()
+        if (user) {
+          setUserId(user.id)
+        } else {
+          setError("You must be logged in to manage projects")
+        }
+      } catch (err) {
+        console.error("Error loading user:", err)
+        setError("Error loading user information")
+      } finally {
+        setIsLoading(false)
+      }
     }
-  }, [loadUser])
+
+    loadUser()
+  }, [])
 
   if (isLoading) {
     return (

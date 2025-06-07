@@ -2,11 +2,8 @@
 
 import { useRef, useEffect } from "react"
 import { Button } from "@/components/ui/button"
-import { Play, Pause, SkipBack, SkipForward, Maximize } from "lucide-react"
+import { Play, Pause, SkipBack, SkipForward } from "lucide-react"
 import type { StoryboardImage } from "./types"
-
-// Importar el sistema de gestión de descripciones
-import { getDescriptionWithFallback, DescriptionType } from "@/lib/description-manager"
 
 interface StoryboardViewerProps {
   activeImage: StoryboardImage
@@ -14,13 +11,11 @@ interface StoryboardViewerProps {
   showControls: boolean
   activeSceneImages: StoryboardImage[]
   activeImageIndex: number
-  projectId: string
   onTogglePlayPause: () => void
   onNextImage: () => void
   onPrevImage: () => void
   onGoToShotByIndex: (index: number) => void
-  onUpdateImageDuration?: (duration: number) => void
-  onEnterFullscreen?: () => void
+  onUpdateImageDuration: (duration: number) => void
 }
 
 export function StoryboardViewer({
@@ -29,26 +24,13 @@ export function StoryboardViewer({
   showControls,
   activeSceneImages,
   activeImageIndex,
-  projectId,
   onTogglePlayPause,
   onNextImage,
   onPrevImage,
   onGoToShotByIndex,
   onUpdateImageDuration,
-  onEnterFullscreen,
 }: StoryboardViewerProps) {
-  // Add this at the beginning of the component function, right after the destructuring of props
-  const videoRef = useRef<HTMLVideoElement>(null) // Initialize videoRef outside the conditional block
-
-  if (!activeImage) {
-    return (
-      <div className="relative w-full" style={{ height: "60vh" }}>
-        <div className="absolute inset-0 flex items-center justify-center bg-black">
-          <p className="text-white">No image selected</p>
-        </div>
-      </div>
-    )
-  }
+  const videoRef = useRef<HTMLVideoElement>(null)
 
   const playVideo = async (videoElement: HTMLVideoElement) => {
     try {
@@ -73,20 +55,11 @@ export function StoryboardViewer({
 
   const handleVideoMetadata = () => {
     if (videoRef.current && videoRef.current.duration) {
-      onUpdateImageDuration?.(videoRef.current.duration)
+      onUpdateImageDuration(videoRef.current.duration)
     }
-  }
-
-  // Modificar la función para obtener la descripción
-  const getImageDescription = (image: StoryboardImage) => {
-    return getDescriptionWithFallback(projectId, DescriptionType.IMAGE, image.id, image.description || "")
   }
 
   const renderMedia = () => {
-    if (!activeImage) {
-      return null
-    }
-
     if (activeImage.url.endsWith(".mp4")) {
       return (
         <video
@@ -102,7 +75,7 @@ export function StoryboardViewer({
       return (
         <img
           src={activeImage.url || "/placeholder.svg"}
-          alt={getImageDescription(activeImage) || "Storyboard image"}
+          alt={activeImage.description || "Storyboard image"}
           className="w-full h-full object-contain"
         />
       )
@@ -112,18 +85,6 @@ export function StoryboardViewer({
   return (
     <div className="relative w-full" style={{ height: "60vh" }}>
       <div className="absolute inset-0 flex items-start justify-center bg-black pt-2">{renderMedia()}</div>
-
-      {/* Botón de ampliar en la esquina superior izquierda */}
-      {onEnterFullscreen && (
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={onEnterFullscreen}
-          className="absolute top-2 left-2 text-white hover:bg-white/20 bg-black/40 z-10"
-        >
-          <Maximize className="h-5 w-5" />
-        </Button>
-      )}
 
       {showControls && (
         <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/80 to-transparent">

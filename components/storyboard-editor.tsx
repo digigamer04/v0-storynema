@@ -74,10 +74,6 @@ import MediaManager from "@/components/media-manager"
 // Añadir esta línea junto con las otras importaciones cerca del inicio del archivo
 import SceneMasterClock from "@/components/timeline/SceneMasterClock"
 
-// Añadir esta importación al principio del archivo, junto con las otras importaciones
-import HermeticScriptViewer from "@/components/hermetic-script-viewer"
-import ScriptSyncManager from "@/components/script-sync-manager"
-
 // Modificar la interfaz ScriptScene para que coincida con la estructura de las escenas del guion
 interface ScriptScene {
   id: string
@@ -1698,37 +1694,10 @@ export function StoryboardEditor({
   }
 
   // Modificar el return para mover el botón de subir audio y mejorar la interfaz
-  // Añadir el ScriptSyncManager antes del return
   return (
     <>
-      {/* Componente invisible para sincronización de guiones */}
-      <ScriptSyncManager projectId={projectId} scenes={scriptScenes || []} />
-
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-4">
         <div className="md:col-span-2">
-          {/* Añadir el visor hermético de guiones aquí */}
-          <div className="mb-4">
-            <HermeticScriptViewer
-              projectId={projectId}
-              activeSceneId={activeScene?.id}
-              activeSceneIndex={activeSceneIndex}
-              onSceneChange={(index) => {
-                // Solo actualizar si es diferente para evitar loops
-                if (index !== activeSceneIndex) {
-                  setActiveSceneIndex(index)
-                  setActiveImageIndex(0)
-                  setCurrentTime(0)
-
-                  // Sincronizar con el editor de guiones si es necesario
-                  if (setScriptActiveSceneIndex) {
-                    setScriptActiveSceneIndex(index)
-                  }
-                }
-              }}
-              scenes={scriptScenes}
-            />
-          </div>
-
           <audio
             ref={audioRef}
             src={audioTrack?.url}

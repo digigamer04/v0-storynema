@@ -1,0 +1,2 @@
+# Ignorar explícitamente el archivo mjs para evitar conflictos
+next.config.mjs

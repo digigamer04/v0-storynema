@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
@@ -64,50 +64,38 @@ export default function ProjectManagement({ userId }: ProjectManagementProps) {
   const [selectedBackup, setSelectedBackup] = useState<string | null>(null)
 
   // Cargar proyectos al iniciar
-  // Modificar la función loadProjects para evitar loops y mejorar el manejo de errores
-  const loadProjects = useCallback(async () => {
-    if (!userId) return
-
-    // Evitar cargar si ya estamos cargando
-    if (isLoading) return
-
-    try {
-      setIsLoading(true)
-      setError(null)
-
-      // Usar directamente el cliente de Supabase
-      const supabase = createClientSupabaseClient()
-      const { data, error: supabaseError } = await supabase
-        .from("projects")
-        .select("*")
-        .eq("user_id", userId)
-        .order("updated_at", { ascending: false })
-
-      if (supabaseError) {
-        throw supabaseError
-      }
-
-      console.log("Loaded projects:", data)
-      setProjects(data || [])
-    } catch (err) {
-      console.error("Error loading projects:", err)
-      setError("Error loading projects. Please try again.")
-    } finally {
-      setIsLoading(false)
-    }
-  }, [userId, isLoading])
-
-  // Actualizar el useEffect para usar la función con useCallback
   useEffect(() => {
+    const loadProjects = async () => {
+      try {
+        setIsLoading(true)
+        setError(null)
+
+        // Usar directamente el cliente de Supabase
+        const supabase = createClientSupabaseClient()
+        const { data, error: supabaseError } = await supabase
+          .from("projects")
+          .select("*")
+          .eq("user_id", userId)
+          .order("updated_at", { ascending: false })
+
+        if (supabaseError) {
+          throw supabaseError
+        }
+
+        console.log("Loaded projects:", data)
+        setProjects(data || [])
+      } catch (err) {
+        console.error("Error loading projects:", err)
+        setError("Error loading projects. Please try again.")
+      } finally {
+        setIsLoading(false)
+      }
+    }
+
     if (userId) {
       loadProjects()
     }
-
-    // Limpiar estado al desmontar
-    return () => {
-      setIsLoading(false)
-    }
-  }, [userId, loadProjects])
+  }, [userId])
 
   // Filtrar y ordenar proyectos cuando cambian los criterios
   useEffect(() => {
@@ -196,7 +184,7 @@ export default function ProjectManagement({ userId }: ProjectManagementProps) {
   }
 
   const handleCloneProject = async () => {
-    if (!projectToClone || !newProjectTitle.trim() || isProcessing) return
+    if (!projectToClone || !newProjectTitle.trim()) return
 
     try {
       setIsProcessing(true)
@@ -236,21 +224,15 @@ export default function ProjectManagement({ userId }: ProjectManagementProps) {
       }
 
       // Añadir el proyecto clonado a la lista
-      setProjects((prevProjects) => [clonedProject, ...prevProjects])
+      setProjects([clonedProject, ...projects])
 
       toast({
         title: "Proyecto clonado",
         description: "El proyecto ha sido clonado correctamente",
       })
 
-      // Cerrar el diálogo antes de redirigir
-      setProjectToClone(null)
-      setNewProjectTitle("")
-
-      // Redirigir al nuevo proyecto después de un breve retraso
-      setTimeout(() => {
-        router.push(`/projects/${clonedProject.id}`)
-      }, 100)
+      // Redirigir al nuevo proyecto
+      router.push(`/projects/${clonedProject.id}`)
     } catch (error) {
       console.error("Error cloning project:", error)
       toast({
@@ -260,6 +242,8 @@ export default function ProjectManagement({ userId }: ProjectManagementProps) {
       })
     } finally {
       setIsProcessing(false)
+      setProjectToClone(null)
+      setNewProjectTitle("")
     }
   }
 

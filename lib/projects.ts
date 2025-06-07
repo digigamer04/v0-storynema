@@ -276,26 +276,3 @@ export async function restoreProject(backupId: string) {
     throw error
   }
 }
-
-export async function saveScenes(projectId: string, scenes: any[]) {
-  try {
-    console.log(`Guardando escenas para el proyecto: ${projectId}`)
-
-    // Validar datos
-    if (!projectId || !scenes) {
-      throw new Error("ID de proyecto y escenas son requeridos")
-    }
-
-    // Crear cliente de Supabase
-    const supabase = createServerSupabaseClient()
-
-    // Actualizar el proyecto
-    //const { data: project, error } = await supabase.from("projects").update(data).eq("id", projectId).select().single()
-
-    //console.log(`Proyecto actualizado correctamente: ${projectId}`)
-    return true
-  } catch (error) {
-    console.error("Error en updateProject:", error)
-    throw error
-  }
-}

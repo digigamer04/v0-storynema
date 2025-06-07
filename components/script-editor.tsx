@@ -37,37 +37,33 @@ import {
   MoveDown,
   GripVertical,
   FlipVertical,
-  Wifi,
-  AlertCircle,
 } from "lucide-react"
 import {
   Dialog,
   DialogContent,
-  DialogDescription, // Añadido DialogDescription
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu" // Añadido DropdownMenu
-import { Alert, AlertDescription } from "@/components/ui/alert"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 
+// Importar el componente MarkdownRenderer
 import MarkdownRenderer from "@/components/markdown-renderer"
-import { updateScene, deleteScene as deleteSceneFromDB, reorderScenesInstant } from "@/lib/scenes"
+import { updateScene, reorderScenes } from "@/lib/scenes"
 import { toast } from "@/components/ui/use-toast"
-import { authenticatedFetch, getUserClient } from "@/lib/auth"
-import OfflineManager from "@/lib/offline-manager"
 
-// Importar el logger
-import { logger, DebugLoggerComponent } from "@/components/debug-logger"
+// Importar el administrador de estado
+import { saveScenes } from "@/lib/state-manager"
 
 interface ScriptEditorProps {
   projectId: string
-  scenes: any[] // REQUERIDO: El padre DEBE pasar las escenas
-  onScenesChange: (scenes: any[]) => void // REQUERIDO: Callback para notificar cambios de escenas
-  activeSceneIndex: number // REQUERIDO: El padre DEBE controlar el índice activo
-  onActiveSceneIndexChange: (index: number) => void // REQUERIDO: Callback para cambios de índice activo
+  scenes?: any[]
+  setScenes?: (scenes: any[]) => void
+  activeSceneIndex?: number
+  setActiveSceneIndex?: (index: number) => void
   generatedContent?: string
   setGeneratedContent?: (content: string) => void
   aiSuggestions?: string[]
@@ -81,71 +77,36 @@ interface Version {
   content: string
 }
 
-const StatusIndicator = () => {
-  const [isOnline, setIsOnline] = useState(navigator.onLine)
-
-  useEffect(() => {
-    const handleOnline = () => setIsOnline(true)
-    const handleOffline = () => setIsOnline(false)
-
-    window.addEventListener("online", handleOnline)
-    window.addEventListener("offline", handleOffline)
-
-    return () => {
-      window.removeEventListener("online", handleOnline)
-      window.removeEventListener("offline", handleOffline)
-    }
-  }, [])
-
-  return (
-    <Alert variant={isOnline ? "default" : "destructive"}>
-      {isOnline ? (
-        <>
-          <Wifi className="h-4 w-4" />
-          <AlertDescription>Conectado</AlertDescription>
-        </>
-      ) : (
-        <>
-          <AlertCircle className="h-4 w-4" />
-          <AlertDescription>Sin conexión</AlertDescription>
-        </>
-      )}
-    </Alert>
-  )
-}
-
 export function ScriptEditor({
   projectId,
-  scenes, // Directamente de props
-  onScenesChange, // Directamente de props
-  activeSceneIndex, // Directamente de props
-  onActiveSceneIndexChange, // Directamente de props
+  scenes: externalScenes,
+  setScenes: setExternalScenes,
+  activeSceneIndex: externalActiveSceneIndex,
+  setActiveSceneIndex: setExternalActiveSceneIndex,
   generatedContent,
   setGeneratedContent,
   aiSuggestions = [],
   onApplySuggestion,
 }: ScriptEditorProps) {
-  // Log inicial
-  useEffect(() => {
-    logger.info("ScriptEditor", "Componente inicializado (controlado)", {
-      projectId,
-      scenesLength: scenes?.length || 0,
-      activeSceneIndex,
-    })
-  }, [projectId, scenes, activeSceneIndex])
+  // Usar los estados externos si están disponibles, o los internos si no
+  const [internalScenes, setInternalScenes] = useState([
+    {
+      id: "1",
+      title: "ESCENA 1 - NUEVA ESCENA",
+      content: "",
+    },
+  ])
+  const [internalActiveSceneIndex, setInternalActiveSceneIndex] = useState(0)
 
-  // Estados de conectividad y autenticación
-  const [isOnline, setIsOnline] = useState(navigator.onLine)
-  const [isAuthenticated, setIsAuthenticated] = useState(false)
-  const [authChecking, setAuthChecking] = useState(true)
+  const scenesArray = externalScenes || internalScenes
+  const setScenesArray = setExternalScenes || setInternalScenes
+  const activeSceneIdx = externalActiveSceneIndex !== undefined ? externalActiveSceneIndex : internalActiveSceneIndex
+  const setActiveSceneIdx = setExternalActiveSceneIndex || setInternalActiveSceneIndex
 
-  // Derivar activeScene de las props (siempre usar props)
-  const activeScene = scenes[activeSceneIndex] || {
-    id: `fallback-${Date.now()}`, // ID único para fallback si no hay escena
-    title: "Nueva Escena (Fallback)",
+  const activeScene = scenesArray[activeSceneIdx] || {
+    id: "new",
+    title: "Nueva escena",
     content: "",
-    project_id: projectId,
-    order_index: activeSceneIndex,
   }
 
   const [history, setHistory] = useState<string[]>([activeScene?.content || ""])
@@ -159,7 +120,7 @@ export function ScriptEditor({
   const [selectionCoords, setSelectionCoords] = useState({ top: 0, left: 0 })
   const [selectedText, setSelectedText] = useState("")
   const [selectedRange, setSelectedRange] = useState({ start: 0, end: 0 })
-  const [previewMode, setPreviewMode] = useState(true)
+  const [previewMode, setPreviewMode] = useState(true) // Siempre activado para renderizar Markdown
   const [newVersionName, setNewVersionName] = useState("")
   const [showSaveDialog, setShowSaveDialog] = useState(false)
   const [editingVersionId, setEditingVersionId] = useState<number | null>(null)
@@ -167,184 +128,60 @@ export function ScriptEditor({
   const [isReordering, setIsReordering] = useState(false)
 
   const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const offlineManager = OfflineManager.getInstance()
+  const selectionCheckInterval = useRef<NodeJS.Timeout | null>(null)
 
-  // Verificar autenticación y conectividad al cargar
   useEffect(() => {
-    const checkAuth = async () => {
-      try {
-        logger.debug("ScriptEditor", "Verificando autenticación...")
-        const user = await getUserClient()
-        setIsAuthenticated(!!user)
-        logger.info("ScriptEditor", "Estado de autenticación", { isAuthenticated: !!user, userId: user?.id })
-      } catch (error) {
-        logger.error("ScriptEditor", "Error verificando autenticación", { error: error.message }, error)
-        setIsAuthenticated(false)
-      } finally {
-        setAuthChecking(false)
+    if (externalScenes) {
+      const sortedScenes = [...externalScenes].sort((a, b) => {
+        if (a.order_index !== undefined && b.order_index !== undefined) {
+          return a.order_index - b.order_index
+        }
+        return 0
+      })
+
+      const currentIds = internalScenes.map((scene) => scene.id).join(",")
+      const newIds = sortedScenes.map((scene) => scene.id).join(",")
+
+      if (currentIds !== newIds || JSON.stringify(internalScenes) !== JSON.stringify(sortedScenes)) {
+        console.log("Actualizando escenas desde props externos")
+        setInternalScenes(sortedScenes)
       }
     }
+  }, [externalScenes, internalScenes])
 
-    checkAuth()
-
-    // Escuchar cambios de conectividad
-    const handleOnline = () => {
-      setIsOnline(true)
-      logger.info("ScriptEditor", "Conexión restaurada")
-    }
-    const handleOffline = () => {
-      setIsOnline(false)
-      logger.warn("ScriptEditor", "Conexión perdida")
-    }
-
-    window.addEventListener("online", handleOnline)
-    window.addEventListener("offline", handleOffline)
-
-    return () => {
-      window.removeEventListener("online", handleOnline)
-      window.removeEventListener("offline", handleOffline)
-    }
-  }, [])
-
-  // Sincronizar historial y versiones cuando cambia la escena activa (basado en props)
   useEffect(() => {
-    if (scenes[activeSceneIndex]) {
-      logger.debug("ScriptEditor", "Sincronizando historial/versiones con nueva escena activa", {
-        sceneId: scenes[activeSceneIndex].id,
-        activeSceneIndex,
-      })
-      setHistory([scenes[activeSceneIndex].content || ""])
-      setHistoryIndex(0)
-
-      // Cargar versiones guardadas localmente para esta escena
-      try {
-        const savedVersions = localStorage.getItem(
-          `storynema_versions_scene_${scenes[activeSceneIndex].id}_${projectId}`,
-        )
-        if (savedVersions) {
-          setVersions(JSON.parse(savedVersions))
-        } else {
-          const initialVersion = {
-            id: Date.now(),
-            date: new Date().toLocaleString(),
-            description: "Versión inicial",
-            content: scenes[activeSceneIndex].content || "",
-          }
-          setVersions([initialVersion])
-        }
-      } catch (error) {
-        console.error("Error loading versions from localStorage:", error)
-        const initialVersion = {
-          id: Date.now(),
-          date: new Date().toLocaleString(),
-          description: "Versión inicial",
-          content: scenes[activeSceneIndex].content || "",
-        }
-        setVersions([initialVersion])
-      }
+    if (externalActiveSceneIndex !== undefined) {
+      setInternalActiveSceneIndex(externalActiveSceneIndex)
     }
-  }, [activeSceneIndex, scenes, projectId]) // Dependencias actualizadas
-
-  // Función auxiliar para manejar operaciones que requieren autenticación
-  const handleAuthenticatedOperation = async (operation: () => Promise<void>, fallback?: () => void) => {
-    if (!isAuthenticated) {
-      logger.warn("ScriptEditor", "Operación requiere autenticación")
-      toast({
-        title: "Se requiere autenticación",
-        description: "Por favor, inicia sesión para guardar cambios.",
-        variant: "destructive",
-      })
-
-      if (fallback) {
-        fallback()
-      }
-      return
-    }
-
-    if (!isOnline) {
-      logger.warn("ScriptEditor", "Operación sin conexión, usando fallback")
-      if (fallback) {
-        fallback()
-      }
-      toast({
-        title: "Sin conexión",
-        description: "Los cambios se guardarán cuando recuperes la conexión.",
-        variant: "default",
-      })
-      return
-    }
-
-    try {
-      logger.debug("ScriptEditor", "Ejecutando operación autenticada")
-      await operation()
-      logger.info("ScriptEditor", "Operación autenticada completada exitosamente")
-    } catch (error) {
-      logger.error("ScriptEditor", "Error en operación autenticada", { error: error.message }, error)
-
-      if (fallback) {
-        fallback()
-      }
-
-      toast({
-        title: "Error al guardar",
-        description: "Los cambios se guardarán localmente y se sincronizarán más tarde.",
-        variant: "destructive",
-      })
-    }
-  }
+  }, [externalActiveSceneIndex])
 
   const handleSceneContentChange = useCallback(
     (content: string) => {
-      if (!activeScene) {
-        logger.warn("ScriptEditor", "No hay escena activa para cambiar contenido")
-        return
-      }
-
-      logger.debug("ScriptEditor", "Cambiando contenido de escena", {
-        sceneId: activeScene.id,
-        contentLength: content.length,
-        activeSceneIndex,
-      })
+      if (!activeScene) return
 
       const updatedScene = { ...activeScene, content }
-      const updatedScenes = scenes.map((s, index) => (index === activeSceneIndex ? updatedScene : s))
+      const updatedScenes = [...scenesArray]
+      updatedScenes[activeSceneIdx] = updatedScene
+      setScenesArray(updatedScenes)
 
-      // Notificar al padre
-      onScenesChange(updatedScenes)
+      saveScenes(projectId, updatedScenes)
 
       const newHistory = history.slice(0, historyIndex + 1)
       newHistory.push(content)
       setHistory(newHistory)
       setHistoryIndex(newHistory.length - 1)
 
-      // Intentar guardar en servidor con manejo de errores
-      const saveToServer = async () => {
-        logger.api("ScriptEditor", "Guardando contenido en servidor", { sceneId: activeScene.id })
-        await updateScene(activeScene.id, { content })
-        logger.api("ScriptEditor", "Contenido guardado exitosamente en servidor")
+      if (activeScene.id !== "new" && !activeScene.is_temporary) {
+        updateScene(activeScene.id, { content }).catch((error) => console.error("Error updating scene content:", error))
+      } else {
+        console.log("Omitiendo actualización de escena temporal en la base de datos")
       }
-
-      const saveOffline = () => {
-        logger.warn("ScriptEditor", "Guardando contenido offline", { sceneId: activeScene.id })
-        offlineManager.addPendingChange({
-          type: "update",
-          entity: "scene",
-          data: { id: activeScene.id, content },
-          projectId,
-        })
-      }
-
-      handleAuthenticatedOperation(saveToServer, saveOffline)
     },
-    [activeScene, activeSceneIndex, projectId, scenes, history, historyIndex, onScenesChange],
+    [activeScene, activeSceneIdx, projectId, scenesArray, setScenesArray, history, historyIndex],
   )
 
   useEffect(() => {
     if (generatedContent && activeScene) {
-      logger.info("ScriptEditor", "Aplicando contenido generado por IA", {
-        sceneId: activeScene.id,
-        generatedContentLength: generatedContent.length,
-      })
       const updatedContent = activeScene.content + "\n\n" + generatedContent
       handleSceneContentChange(updatedContent)
 
@@ -354,312 +191,191 @@ export function ScriptEditor({
     }
   }, [generatedContent, activeScene, handleSceneContentChange, setGeneratedContent])
 
-  const handleSceneTitleChange = async (title: string) => {
-    logger.debug("ScriptEditor", "Cambiando título de escena", {
-      sceneId: activeScene.id,
-      oldTitle: activeScene.title,
-      newTitle: title,
-    })
-
+  const handleSceneTitleChange = (title: string) => {
     const updatedScene = { ...activeScene, title }
-    const updatedScenes = scenes.map((s, index) => (index === activeSceneIndex ? updatedScene : s))
+    const updatedScenes = [...scenesArray]
+    updatedScenes[activeSceneIdx] = updatedScene
+    setScenesArray(updatedScenes)
 
-    // Notificar al padre
-    onScenesChange(updatedScenes)
+    saveScenes(projectId, updatedScenes)
 
-    // Auto-guardar en servidor instantáneamente
-    const saveToServer = async () => {
-      logger.api("ScriptEditor", "Guardando título en servidor", { sceneId: activeScene.id, title })
-      await updateScene(activeScene.id, { title })
-      logger.api("ScriptEditor", "Título guardado exitosamente en servidor")
-    }
-
-    const saveOffline = () => {
-      logger.warn("ScriptEditor", "Guardando título offline", { sceneId: activeScene.id, title })
-      offlineManager.addPendingChange({
-        type: "update",
-        entity: "scene",
-        data: { id: activeScene.id, title },
-        projectId,
-      })
-    }
-
-    // Ejecutar auto-guardado si está autenticado y online
-    if (isAuthenticated && isOnline) {
-      saveToServer()
+    if (activeScene.id !== "new" && !activeScene.is_temporary) {
+      updateScene(activeScene.id, { title }).catch((error) => console.error("Error updating scene title:", error))
     } else {
-      saveOffline()
+      console.log("Omitiendo actualización de escena temporal en la base de datos")
     }
   }
 
-  const moveSceneUp = async (index: number) => {
-    if (index <= 0) {
-      logger.warn("ScriptEditor", "No se puede mover escena hacia arriba", { index })
+  const handleSceneChange = (sceneId: string) => {
+    if (activeScene.id === sceneId) {
       return
     }
 
-    logger.info("ScriptEditor", "Moviendo escena hacia arriba", { index, sceneId: scenes[index].id })
+    const newIndex = scenesArray.findIndex((scene) => scene.id === sceneId)
+    if (newIndex !== -1) {
+      setActiveSceneIdx(newIndex)
 
-    const updatedScenes = [...scenes]
+      setHistory([scenesArray[newIndex].content])
+      setHistoryIndex(0)
+
+      try {
+        const savedVersions = localStorage.getItem(`storynema_versions_scene_${sceneId}_${projectId}`)
+        if (savedVersions) {
+          const parsedVersions = JSON.parse(savedVersions)
+          setVersions(parsedVersions)
+        } else {
+          const initialVersion = {
+            id: Date.now(),
+            date: new Date().toLocaleString(),
+            description: "Versión inicial",
+            content: scenesArray[newIndex].content,
+          }
+          setVersions([initialVersion])
+        }
+      } catch (error) {
+        console.error("Error loading versions from localStorage:", error)
+        const initialVersion = {
+          id: Date.now(),
+          date: new Date().toLocaleString(),
+          description: "Versión inicial",
+          content: scenesArray[newIndex].content,
+        }
+        setVersions([initialVersion])
+      }
+    }
+  }
+
+  const moveSceneUp = (index: number) => {
+    if (index <= 0) return
+
+    const updatedScenes = [...scenesArray]
     const temp = updatedScenes[index]
     updatedScenes[index] = updatedScenes[index - 1]
     updatedScenes[index - 1] = temp
 
-    // Reasignar order_index a todas las escenas en el nuevo array
-    const scenesWithNewOrder = updatedScenes.map((scene, idx) => ({
-      ...scene,
-      order_index: idx,
-    }))
+    updatedScenes.forEach((scene, idx) => {
+      scene.order_index = idx
+    })
 
-    let newActiveIndex = activeSceneIndex
-    if (activeSceneIndex === index) {
-      newActiveIndex = index - 1
-    } else if (activeSceneIndex === index - 1) {
-      newActiveIndex = index
+    setScenesArray(updatedScenes)
+
+    saveScenes(projectId, updatedScenes)
+
+    if (activeSceneIdx === index) {
+      setActiveSceneIdx(index - 1)
+    } else if (activeSceneIdx === index - 1) {
+      setActiveSceneIdx(index)
     }
 
-    // Notificar al padre
-    onScenesChange(scenesWithNewOrder)
-    onActiveSceneIndexChange(newActiveIndex)
-
-    // Auto-guardar instantáneamente
-    const saveToServer = async () => {
-      logger.api("ScriptEditor", "Guardando nuevo orden en servidor")
-      const sceneIds = scenesWithNewOrder.map((scene) => scene.id)
-      await reorderScenesInstant(projectId, sceneIds)
-      logger.api("ScriptEditor", "Orden guardado exitosamente en servidor")
-    }
-
-    const saveOffline = () => {
-      logger.warn("ScriptEditor", "Guardando orden offline")
-      scenesWithNewOrder.forEach((scene, idx) => {
-        offlineManager.addPendingChange({
-          type: "update",
-          entity: "scene",
-          data: { id: scene.id, order_index: idx },
-          projectId,
-        })
-      })
-    }
-
-    if (isAuthenticated && isOnline) {
-      saveToServer()
-    } else {
-      saveOffline()
-    }
+    const sceneIds = updatedScenes.map((scene) => scene.id)
+    reorderScenes(projectId, sceneIds).catch((error) => console.error("Error reordering scenes:", error))
 
     toast({
       title: "Orden actualizado",
-      description: "El orden de las escenas ha sido actualizado automáticamente",
+      description: "El orden de las escenas ha sido actualizado",
       duration: 2000,
     })
   }
 
-  const moveSceneDown = async (index: number) => {
-    if (index >= scenes.length - 1) {
-      logger.warn("ScriptEditor", "No se puede mover escena hacia abajo", { index, totalScenes: scenes.length })
-      return
-    }
+  const moveSceneDown = (index: number) => {
+    if (index >= scenesArray.length - 1) return
 
-    logger.info("ScriptEditor", "Moviendo escena hacia abajo", { index, sceneId: scenes[index].id })
-
-    const updatedScenes = [...scenes]
+    const updatedScenes = [...scenesArray]
     const temp = updatedScenes[index]
     updatedScenes[index] = updatedScenes[index + 1]
     updatedScenes[index + 1] = temp
 
-    // Reasignar order_index a todas las escenas en el nuevo array
-    const scenesWithNewOrder = updatedScenes.map((scene, idx) => ({
-      ...scene,
-      order_index: idx,
-    }))
+    updatedScenes.forEach((scene, idx) => {
+      scene.order_index = idx
+    })
 
-    let newActiveIndex = activeSceneIndex
-    if (activeSceneIndex === index) {
-      newActiveIndex = index + 1
-    } else if (activeSceneIndex === index + 1) {
-      newActiveIndex = index
+    setScenesArray(updatedScenes)
+
+    saveScenes(projectId, updatedScenes)
+
+    if (activeSceneIdx === index) {
+      setActiveSceneIdx(index + 1)
+    } else if (activeSceneIdx === index + 1) {
+      setActiveSceneIdx(index)
     }
 
-    // Notificar al padre
-    onScenesChange(scenesWithNewOrder)
-    onActiveSceneIndexChange(newActiveIndex)
-
-    // Auto-guardar instantáneamente
-    const saveToServer = async () => {
-      logger.api("ScriptEditor", "Guardando nuevo orden en servidor")
-      const sceneIds = scenesWithNewOrder.map((scene) => scene.id)
-      await reorderScenesInstant(projectId, sceneIds)
-      logger.api("ScriptEditor", "Orden guardado exitosamente en servidor")
-    }
-
-    const saveOffline = () => {
-      logger.warn("ScriptEditor", "Guardando orden offline")
-      scenesWithNewOrder.forEach((scene, idx) => {
-        offlineManager.addPendingChange({
-          type: "update",
-          entity: "scene",
-          data: { id: scene.id, order_index: idx },
-          projectId,
-        })
-      })
-    }
-
-    if (isAuthenticated && isOnline) {
-      saveToServer()
-    } else {
-      saveOffline()
-    }
+    const sceneIds = updatedScenes.map((scene) => scene.id)
+    reorderScenes(projectId, sceneIds).catch((error) => console.error("Error reordering scenes:", error))
 
     toast({
       title: "Orden actualizado",
-      description: "El orden de las escenas ha sido actualizado automáticamente",
+      description: "El orden de las escenas ha sido actualizado",
       duration: 2000,
     })
   }
 
-  const deleteScene = async (sceneIdToDelete: string) => {
-    if (scenes.length <= 1) {
-      logger.warn("ScriptEditor", "No se puede eliminar la única escena restante")
-      return
-    }
-
-    logger.info("ScriptEditor", "Eliminando escena", { sceneId: sceneIdToDelete, totalScenes: scenes.length })
-
-    const updatedScenes = scenes.filter((s) => s.id !== sceneIdToDelete)
-    // Reasignar order_index a las escenas restantes
-    const scenesWithNewOrder = updatedScenes.map((scene, idx) => ({
-      ...scene,
-      order_index: idx,
-    }))
-
-    let newActiveIndex = activeSceneIndex
-    if (activeScene.id === sceneIdToDelete) {
-      newActiveIndex = Math.min(activeSceneIndex, scenesWithNewOrder.length - 1)
-      setHistory([scenesWithNewOrder[newActiveIndex]?.content || ""])
-      setHistoryIndex(0)
-
-      const initialVersion = {
-        id: Date.now(),
-        date: new Date().toLocaleString(),
-        description: "Versión inicial",
-        content: scenesWithNewOrder[newActiveIndex]?.content || "",
-      }
-      setVersions([initialVersion])
-    } else if (scenes.findIndex((s) => s.id === sceneIdToDelete) < activeSceneIndex) {
-      newActiveIndex = activeSceneIndex - 1
-    }
-
-    // Notificar al padre
-    onScenesChange(scenesWithNewOrder)
-    onActiveSceneIndexChange(newActiveIndex)
-
-    // Auto-eliminar de la base de datos instantáneamente
-    const deleteFromServer = async () => {
-      logger.api("ScriptEditor", "Eliminando escena del servidor", { sceneId: sceneIdToDelete })
-      await deleteSceneFromDB(sceneIdToDelete, projectId)
-      logger.api("ScriptEditor", "Escena eliminada exitosamente del servidor")
-
-      toast({
-        title: "Escena eliminada",
-        description: "La escena ha sido eliminada automáticamente",
-        duration: 2000,
-      })
-    }
-
-    const deleteOffline = () => {
-      logger.warn("ScriptEditor", "Eliminando escena offline", { sceneId: sceneIdToDelete })
-      offlineManager.addPendingChange({
-        type: "delete",
-        entity: "scene",
-        data: { id: sceneIdToDelete },
-        projectId,
-      })
-
-      toast({
-        title: "Escena eliminada localmente",
-        description: "Se eliminará del servidor cuando recuperes la conexión",
-        duration: 3000,
-      })
-    }
-
-    if (isAuthenticated && isOnline) {
-      deleteFromServer()
-    } else {
-      deleteOffline()
-    }
-  }
+  // Modificar la función reverseScenes para asegurar que la inversión se aplique profundamente en la base de datos
 
   const reverseScenes = async () => {
-    if (scenes.length <= 1) {
-      logger.warn("ScriptEditor", "No se puede invertir orden con una sola escena")
-      return
-    }
-
-    logger.info("ScriptEditor", "Invirtiendo orden de escenas", { totalScenes: scenes.length })
+    if (scenesArray.length <= 1) return
 
     setIsReordering(true)
     try {
-      const reversedScenes = [...scenes].reverse()
+      // Crear una copia del array de escenas
+      const scenesToReverse = [...scenesArray]
+      const totalScenes = scenesToReverse.length
 
-      // Reasignar order_index a todas las escenas en el nuevo array
-      const scenesWithNewOrder = reversedScenes.map((scene, idx) => ({
-        ...scene,
-        order_index: idx,
-      }))
+      // Crear un nuevo array con el orden invertido
+      const reversedScenes = []
+      for (let i = totalScenes - 1; i >= 0; i--) {
+        reversedScenes.push({
+          ...scenesToReverse[i],
+          order_index: totalScenes - 1 - i,
+        })
+      }
 
-      let newActiveIndex = activeSceneIndex
-      if (activeSceneIndex !== null && activeScene) {
-        const activeSceneId = activeScene.id
-        const newIndex = scenesWithNewOrder.findIndex((scene) => scene.id === activeSceneId)
+      // Actualizar el estado local con las escenas invertidas
+      setScenesArray(reversedScenes)
+
+      // Guardar en el administrador de estado global
+      saveScenes(projectId, reversedScenes)
+
+      // Actualizar el índice de la escena activa si es necesario
+      if (activeSceneIdx !== null) {
+        const activeSceneId = scenesArray[activeSceneIdx].id
+        const newIndex = reversedScenes.findIndex((scene) => scene.id === activeSceneId)
         if (newIndex !== -1) {
-          newActiveIndex = newIndex
+          setActiveSceneIdx(newIndex)
         }
       }
 
-      // Notificar al padre
-      onScenesChange(scenesWithNewOrder)
-      onActiveSceneIndexChange(newActiveIndex)
-
-      // Auto-guardar instantáneamente
-      const saveToServer = async () => {
-        logger.api("ScriptEditor", "Guardando orden invertido en servidor")
-        const sceneIds = scenesWithNewOrder.map((scene) => scene.id)
-        await reorderScenesInstant(projectId, sceneIds)
-        logger.api("ScriptEditor", "Orden invertido guardado exitosamente en servidor")
-
-        toast({
-          title: "Orden invertido",
-          description: "El orden de las escenas ha sido invertido y guardado automáticamente",
-          duration: 2000,
-        })
-      }
-
-      const saveOffline = () => {
-        logger.warn("ScriptEditor", "Guardando orden invertido offline")
-        scenesWithNewOrder.forEach((scene, index) => {
-          offlineManager.addPendingChange({
-            type: "update",
-            entity: "scene",
-            data: { id: scene.id, order_index: index },
-            projectId,
+      // Actualizar el orden en la base de datos
+      // Primero, actualizar cada escena individualmente con su nuevo order_index
+      const updatePromises = reversedScenes.map(async (scene, index) => {
+        try {
+          console.log(`Actualizando escena ${scene.id} a posición ${index} en la base de datos`)
+          await updateScene(scene.id, { order_index: index })
+          console.log(`Escena ${scene.id} actualizada correctamente`)
+        } catch (updateError) {
+          console.error(`Error al actualizar la escena ${scene.id}:`, updateError)
+          toast({
+            title: "Error al actualizar la escena",
+            description: `No se pudo actualizar la escena ${scene.title}. Inténtalo de nuevo.`,
+            variant: "destructive",
+            duration: 4000,
           })
-        })
+        }
+      })
 
-        toast({
-          title: "Orden invertido localmente",
-          description: "Se guardará en el servidor cuando recuperes la conexión",
-          duration: 3000,
-        })
-      }
+      // Esperar a que todas las actualizaciones individuales se completen
+      await Promise.all(updatePromises)
 
-      if (isAuthenticated && isOnline) {
-        saveToServer()
-      } else {
-        saveOffline()
-      }
+      // Luego, usar reorderScenes para asegurar la consistencia del orden
+      const sceneIds = reversedScenes.map((scene) => scene.id)
+      await reorderScenes(projectId, sceneIds)
+
+      toast({
+        title: "Orden invertido",
+        description: "El orden de las escenas ha sido invertido correctamente",
+        duration: 2000,
+      })
     } catch (error) {
-      logger.error("ScriptEditor", "Error al invertir orden de escenas", { error: error.message }, error)
+      console.error("Error al invertir el orden de las escenas:", error)
       toast({
         title: "Error",
         description: "No se pudo invertir el orden de las escenas. Inténtalo de nuevo.",
@@ -671,74 +387,44 @@ export function ScriptEditor({
     }
   }
 
-  const addNewScene = async () => {
-    if (!isAuthenticated) {
-      logger.warn("ScriptEditor", "Intento de crear escena sin autenticación")
-      toast({
-        title: "Se requiere autenticación",
-        description: "Por favor, inicia sesión para crear nuevas escenas.",
-        variant: "destructive",
-      })
-      return
-    }
-
-    logger.info("ScriptEditor", "Creando nueva escena", { currentScenesCount: scenes.length })
-
+  const saveCurrentState = useCallback(() => {
     try {
-      toast({
-        title: "Creando nueva escena...",
-        description: "Por favor, espera un momento.",
-      })
+      // Guardar el estado actual con timestamp
+      localStorage.setItem(`storynema_scenes_${projectId}`, JSON.stringify(scenesArray))
+      localStorage.setItem(`storynema_last_update_time_${projectId}`, Date.now().toString())
+      localStorage.setItem(`storynema_last_update_source_${projectId}`, "script_editor")
+    } catch (error) {
+      console.error("Error saving current state:", error)
+    }
+  }, [projectId, scenesArray])
 
-      let newSceneData
+  useEffect(() => {
+    if (scenesArray.length > 0) {
+      saveCurrentState()
+    }
+  }, [scenesArray, saveCurrentState])
 
-      if (isOnline) {
-        // Intentar crear en servidor
-        logger.api("ScriptEditor", "Creando escena en servidor")
-        const response = await authenticatedFetch(`/api/projects/${projectId}/scenes`, {
-          method: "POST",
-          body: JSON.stringify({
-            title: `ESCENA ${scenes.length + 1} - NUEVA ESCENA`,
-            order_index: scenes.length, // Asignar order_index basado en la longitud actual
-          }),
-        })
-
-        if (!response.ok) {
-          throw new Error("No se pudo crear la escena en el servidor.")
-        }
-
-        newSceneData = await response.json()
-        logger.api("ScriptEditor", "Escena creada exitosamente en servidor", { sceneId: newSceneData.id })
-      } else {
-        // Crear escena temporal offline
-        newSceneData = {
-          id: `temp-${Date.now()}`,
-          project_id: projectId,
-          title: `ESCENA ${scenes.length + 1} - NUEVA ESCENA (Offline)`,
-          content: "",
-          order_index: scenes.length, // Asignar order_index
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          is_temporary: true, // Marcar como temporal
-        }
-
-        logger.warn("ScriptEditor", "Creando escena offline", { tempId: newSceneData.id })
-
-        // Añadir a la cola de sincronización
-        offlineManager.addPendingChange({
-          type: "create",
-          entity: "scene",
-          data: newSceneData,
-          projectId,
-        })
+  const addNewScene = async () => {
+    try {
+      // Crear una escena temporal en memoria
+      const tempScene = {
+        id: `temp-${Date.now()}`, // Asegurar un ID único
+        project_id: projectId,
+        title: `ESCENA ${scenesArray.length + 1} - NUEVA ESCENA`,
+        content: "",
+        order_index: scenesArray.length,
+        is_temporary: true,
       }
 
-      // Actualizar el estado del padre
-      const updatedScenes = [...scenes, newSceneData]
-      const newActiveIndex = updatedScenes.length - 1
+      // Actualizar el estado local
+      const updatedScenes = [...scenesArray, tempScene]
+      setScenesArray(updatedScenes)
 
-      onScenesChange(updatedScenes)
-      onActiveSceneIndexChange(newActiveIndex)
+      // Guardar en el administrador de estado global
+      saveScenes(projectId, updatedScenes)
+
+      // Seleccionar la nueva escena
+      setActiveSceneIdx(updatedScenes.length - 1)
 
       // Reiniciar el historial para la nueva escena
       setHistory([""])
@@ -753,14 +439,14 @@ export function ScriptEditor({
       }
       setVersions([initialVersion])
 
+      // Mostrar un mensaje informativo
       toast({
-        title: "Escena creada",
-        description: isOnline
-          ? "La nueva escena se ha guardado correctamente."
-          : "Escena creada offline. Se sincronizará cuando recuperes la conexión.",
+        title: "Escena temporal creada",
+        description: "Estás trabajando con una escena temporal. Guarda el proyecto para persistir los cambios.",
+        duration: 5000,
       })
     } catch (error) {
-      logger.error("ScriptEditor", "Error creando nueva escena", { error: error.message }, error)
+      console.error("Error creating new scene:", error)
       toast({
         title: "Error al crear escena",
         description: "No se pudo crear la escena. Inténtalo de nuevo.",
@@ -769,9 +455,34 @@ export function ScriptEditor({
     }
   }
 
+  const deleteScene = (sceneId: string) => {
+    if (scenesArray.length <= 1) return
+    const updatedScenes = scenesArray.filter((s) => s.id !== sceneId)
+    setScenesArray(updatedScenes)
+
+    // Guardar en el administrador de estado global
+    saveScenes(projectId, updatedScenes)
+
+    if (activeScene.id === sceneId) {
+      setActiveSceneIdx(0)
+      // Reiniciar el historial al eliminar la escena activa
+      setHistory([updatedScenes[0].content])
+      setHistoryIndex(0)
+
+      // Cargar versiones para la primera escena
+      const initialVersion = {
+        id: Date.now(),
+        date: new Date().toLocaleString(),
+        description: "Versión inicial",
+        content: updatedScenes[0].content,
+      }
+      setVersions([initialVersion])
+    }
+  }
+
   const generateWithAI = () => {
-    logger.info("ScriptEditor", "Iniciando generación con IA")
     setIsGenerating(true)
+    // Simulación de generación con IA
     setTimeout(() => {
       const updatedContent =
         activeScene.content +
@@ -780,11 +491,17 @@ export function ScriptEditor({
         "JUAN\nLos tengo aquí mismo. Trabajé toda la noche para terminarlos.\n\n" +
         "María sonríe, sorprendida por la dedicación de Juan a pesar de su tardanza."
 
-      // Usar handleSceneContentChange para actualizar y notificar al padre
-      handleSceneContentChange(updatedContent)
+      const updatedScene = {
+        ...activeScene,
+        content: updatedContent,
+      }
 
+      const updatedScenes = [...scenesArray]
+      updatedScenes[activeSceneIdx] = updatedScene
+      setScenesArray(updatedScenes)
       setIsGenerating(false)
 
+      // Añadir nueva versión
       const newVersion = {
         id: versions.length + 1,
         date: "Ahora mismo",
@@ -793,106 +510,111 @@ export function ScriptEditor({
       }
       setVersions([newVersion, ...versions])
 
-      logger.info("ScriptEditor", "Generación con IA completada")
+      // Actualizar historial
+      const newHistory = [...history, updatedContent]
+      setHistory(newHistory)
+      setHistoryIndex(newHistory.length - 1)
     }, 2000)
   }
 
   const exportToPDF = () => {
-    logger.info("ScriptEditor", "Exportando a PDF")
+    // Simulación de exportación a PDF
     alert("Guion exportado a PDF correctamente")
   }
 
+  // Función para obtener el guion completo
   const getFullScript = () => {
-    return scenes.map((scene) => `${scene.title}\n\n${scene.content || ""}\n\n`).join("\n")
+    return scenesArray.map((scene) => `${scene.title}\n\n${scene.content}\n\n`).join("\n")
   }
 
+  // Funciones para deshacer/rehacer
   const handleUndo = () => {
-    if (historyIndex > 0 && activeScene) {
-      logger.debug("ScriptEditor", "Deshaciendo cambio", { currentIndex: historyIndex })
+    if (historyIndex > 0) {
       const newIndex = historyIndex - 1
       setHistoryIndex(newIndex)
       const previousContent = history[newIndex]
 
-      // Actualizar el contenido de la escena activa y notificar al padre
       const updatedScene = { ...activeScene, content: previousContent }
-      const updatedScenes = scenes.map((s, i) => (i === activeSceneIndex ? updatedScene : s))
-      onScenesChange(updatedScenes)
+      const updatedScenes = [...scenesArray]
+      updatedScenes[activeSceneIdx] = updatedScene
+      setScenesArray(updatedScenes)
     }
   }
 
   const handleRedo = () => {
-    if (historyIndex < history.length - 1 && activeScene) {
-      logger.debug("ScriptEditor", "Rehaciendo cambio", { currentIndex: historyIndex })
+    if (historyIndex < history.length - 1) {
       const newIndex = historyIndex + 1
       setHistoryIndex(newIndex)
       const nextContent = history[newIndex]
 
-      // Actualizar el contenido de la escena activa y notificar al padre
       const updatedScene = { ...activeScene, content: nextContent }
-      const updatedScenes = scenes.map((s, i) => (i === activeSceneIndex ? updatedScene : s))
-      onScenesChange(updatedScenes)
+      const updatedScenes = [...scenesArray]
+      updatedScenes[activeSceneIdx] = updatedScene
+      setScenesArray(updatedScenes)
     }
   }
 
+  // Funciones para el editor de texto
   const applyTextFormat = (format: string) => {
-    if (!textareaRef.current || !activeScene) return
-
-    logger.debug("ScriptEditor", "Aplicando formato de texto", { format })
+    if (!textareaRef.current) return
 
     const start = selectedRange.start
     const end = selectedRange.end
     const selectedText = activeScene.content.substring(start, end)
-    let newContent = activeScene.content
+    let newText = activeScene.content
     let cursorOffset = 0
 
     switch (format) {
       case "bold":
-        newContent = newContent.substring(0, start) + `**${selectedText}**` + newContent.substring(end)
-        cursorOffset = 4
+        newText = newText.substring(0, start) + `**${selectedText}**` + newText.substring(end)
+        cursorOffset = 4 // ** al inicio y al final
         break
       case "italic":
-        newContent = newContent.substring(0, start) + `_${selectedText}_` + newContent.substring(end)
-        cursorOffset = 2
+        newText = newText.substring(0, start) + `_${selectedText}_` + newText.substring(end)
+        cursorOffset = 2 // _ al inicio y al final
         break
       case "underline":
-        newContent = newContent.substring(0, start) + `__${selectedText}__` + newContent.substring(end)
-        cursorOffset = 4
+        newText = newText.substring(0, start) + `__${selectedText}__` + newText.substring(end)
+        cursorOffset = 4 // __ al inicio y al final
         break
       case "uppercase":
-        newContent = newContent.substring(0, start) + selectedText.toUpperCase() + newContent.substring(end)
+        newText = newText.substring(0, start) + selectedText.toUpperCase() + newText.substring(end)
         break
       case "lowercase":
-        newContent = newContent.substring(0, start) + selectedText.toLowerCase() + newContent.substring(end)
+        newText = newText.substring(0, start) + selectedText.toLowerCase() + newText.substring(end)
         break
       case "capitalize":
-        newContent =
-          newContent.substring(0, start) +
+        newText =
+          newText.substring(0, start) +
           selectedText
             .split(" ")
             .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
             .join(" ") +
-          newContent.substring(end)
+          newText.substring(end)
         break
       case "character":
-        newContent = newContent.substring(0, start) + `${selectedText.toUpperCase()}\n` + newContent.substring(end)
-        cursorOffset = 1
+        newText = newText.substring(0, start) + `${selectedText.toUpperCase()}\n` + newText.substring(end)
+        cursorOffset = 1 // \n al final
         break
       case "dialogue":
-        newContent = newContent.substring(0, start) + `\n${selectedText}\n` + newContent.substring(end)
-        cursorOffset = 2
+        newText = newText.substring(0, start) + `\n${selectedText}\n` + newText.substring(end)
+        cursorOffset = 2 // \n al inicio y al final
         break
       case "parenthetical":
-        newContent = newContent.substring(0, start) + `(${selectedText})` + newContent.substring(end)
-        cursorOffset = 2
+        newText = newText.substring(0, start) + `(${selectedText})` + newText.substring(end)
+        cursorOffset = 2 // ( al inicio y ) al final
         break
       case "scene-heading":
-        newContent = newContent.substring(0, start) + `${selectedText.toUpperCase()}` + newContent.substring(end)
+        newText = newText.substring(0, start) + `${selectedText.toUpperCase()}` + newText.substring(end)
         break
     }
 
-    handleSceneContentChange(newContent) // Esto notificará al padre y guardará
+    handleSceneContentChange(newText)
+
+    // Ocultar la barra de herramientas después de aplicar el formato
     setShowFormatToolbar(false)
 
+    // Restaurar la selección después de aplicar el formato
     setTimeout(() => {
       if (textareaRef.current) {
         textareaRef.current.focus()
@@ -901,16 +623,19 @@ export function ScriptEditor({
     }, 0)
   }
 
+  // 2. Añadimos una función para iniciar la edición de una versión
   const startEditingVersionName = (version: Version) => {
     setEditingVersionId(version.id)
     setEditingVersionName(version.description)
   }
 
+  // 3. Añadimos una función para guardar el nombre editado
   const saveVersionName = (versionId: number) => {
     if (editingVersionName.trim()) {
       const updatedVersions = versions.map((v) => (v.id === versionId ? { ...v, description: editingVersionName } : v))
       setVersions(updatedVersions)
 
+      // Guardar en localStorage
       try {
         localStorage.setItem(`storynema_versions_scene_${activeScene.id}_${projectId}`, JSON.stringify(updatedVersions))
       } catch (error) {
@@ -922,19 +647,22 @@ export function ScriptEditor({
     }
   }
 
+  // Añadir una función para cancelar la edición sin guardar
   const cancelEditingVersionName = () => {
     setEditingVersionId(null)
     setEditingVersionName("")
   }
 
+  // Modificar la función saveCurrentVersion
   const saveCurrentVersion = (description: string) => {
     const newVersion = {
-      id: Date.now(),
-      date: new Date().toLocaleString(),
+      id: Date.now(), // Usar timestamp para ID único
+      date: new Date().toLocaleString(), // Fecha y hora actual formateada
       description,
       content: activeScene.content,
     }
 
+    // Limitar a 10 versiones
     let updatedVersions = [newVersion, ...versions]
     if (updatedVersions.length > 10) {
       updatedVersions = updatedVersions.slice(0, 10)
@@ -942,6 +670,7 @@ export function ScriptEditor({
 
     setVersions(updatedVersions)
 
+    // Guardar versiones en localStorage
     try {
       localStorage.setItem(`storynema_versions_scene_${activeScene.id}_${projectId}`, JSON.stringify(updatedVersions))
     } catch (error) {
@@ -949,13 +678,17 @@ export function ScriptEditor({
     }
   }
 
+  // Modificar las funciones para manejar versiones
   const loadVersion = (version: Version) => {
-    handleSceneContentChange(version.content) // Esto actualiza la escena activa y notifica al padre
+    // Actualizar el contenido de la escena activa con el contenido de la versión
+    handleSceneContentChange(version.content)
 
+    // Añadir al historial para poder deshacer/rehacer
     const newHistory = [...history.slice(0, historyIndex + 1), version.content]
     setHistory(newHistory)
     setHistoryIndex(newHistory.length - 1)
 
+    // Mostrar un mensaje de confirmación
     alert(`Versión "${version.description}" cargada correctamente`)
   }
 
@@ -967,6 +700,7 @@ export function ScriptEditor({
       content: version.content,
     }
 
+    // Limitar a 10 versiones
     let updatedVersions = [newVersion, ...versions]
     if (updatedVersions.length > 10) {
       updatedVersions = updatedVersions.slice(0, 10)
@@ -974,39 +708,45 @@ export function ScriptEditor({
 
     setVersions(updatedVersions)
 
+    // Guardar versiones en localStorage
     try {
       localStorage.setItem(`storynema_versions_scene_${activeScene.id}_${projectId}`, JSON.stringify(updatedVersions))
     } catch (error) {
       console.error("Error saving versions to localStorage:", error)
     }
 
+    // Mostrar un mensaje de confirmación
     alert(`Versión "${version.description}" duplicada correctamente`)
   }
 
   const deleteVersion = (versionId: number) => {
+    // No permitir eliminar si solo queda una versión
     if (versions.length <= 1) return
 
     const updatedVersions = versions.filter((v) => v.id !== versionId)
     setVersions(updatedVersions)
 
+    // Guardar versiones en localStorage
     try {
       localStorage.setItem(`storynema_versions_scene_${activeScene.id}_${projectId}`, JSON.stringify(updatedVersions))
     } catch (error) {
       console.error("Error saving versions to localStorage:", error)
     }
 
+    // Mostrar un mensaje de confirmación
     alert(`Versión eliminada correctamente`)
   }
 
+  // Modificar la posición de la barra flotante para que aparezca más cerca del cursor
   const FloatingToolbar = () => {
     if (!showFormatToolbar) return null
 
     const style = {
       position: "absolute" as const,
-      top: `${selectionCoords.top - 40}px`,
+      top: `${selectionCoords.top - 40}px`, // Ajustado para aparecer 40px más arriba del cursor
       left: `${selectionCoords.left}px`,
       zIndex: 100,
-      transform: "translateX(-50%)",
+      transform: "translateX(-50%)", // Centrar horizontalmente
     }
 
     return (
@@ -1076,6 +816,7 @@ export function ScriptEditor({
     )
   }
 
+  // Componente para el diálogo de guardar versión
   const SaveVersionDialog = () => (
     <Dialog open={showSaveDialog} onOpenChange={setShowSaveDialog}>
       <DialogContent className="bg-[#1E1E1E] border-[#333333] text-gray-200">
@@ -1130,107 +871,135 @@ export function ScriptEditor({
     </Dialog>
   )
 
-  // En handleSceneChange, cambiar para usar la función apropiada:
-  const handleSceneChange = (sceneId: string) => {
-    const newIndex = scenes.findIndex((scene) => scene.id === sceneId)
-    if (newIndex !== -1 && newIndex !== activeSceneIndex) {
-      logger.info("ScriptEditor", "Cambiando escena activa", {
-        oldIndex: activeSceneIndex,
-        newIndex,
-        oldSceneId: activeScene.id,
-        newSceneId: sceneId,
-      })
-
-      onActiveSceneIndexChange(newIndex) // Notificar al padre
-    }
+  // Función para seleccionar una versión
+  const handleSelectVersion = (versionId: number) => {
+    setSelectedVersionId(versionId)
   }
 
-  if (!scenes || scenes.length === 0) {
-    return (
-      <div className="space-y-4">
-        <StatusIndicator />
-        <DebugLoggerComponent />
-        <div className="flex flex-col items-center justify-center h-64 gap-4 bg-[#252525] border border-[#333333] rounded-md p-6">
-          <p className="text-gray-400 mb-4">No hay escenas disponibles. Crea una nueva para comenzar.</p>
-          <div className="flex gap-4">
-            <Button
-              onClick={addNewScene}
-              className="bg-amber-600 hover:bg-amber-700 text-white"
-              disabled={!isAuthenticated}
-            >
-              <PlusCircle className="h-4 w-4 mr-2" />
-              Escribir nueva escena
-            </Button>
-            <Button
-              variant="outline"
-              className="bg-[#2A2A2A] border-[#444444] text-gray-200 hover:bg-[#3A3A3A]"
-              onClick={() => {
-                addNewScene()
-                if (setGeneratedContent) {
-                  setGeneratedContent(
-                    "ESCENA 1 - INTERIOR. OFICINA - DÍA\n\nUna oficina moderna y minimalista. JUAN (35) está sentado frente a su computadora, concentrado en su trabajo.",
-                  )
+  // Añadir un efecto para verificar cambios en el storyboard
+  useEffect(() => {
+    // Verificar si hay cambios desde el storyboard
+    const lastUpdateSource = localStorage.getItem(`storynema_last_update_source_${projectId}`)
+    const lastUpdateTime = localStorage.getItem(`storynema_last_update_time_${projectId}`)
+
+    if (lastUpdateSource === "storyboard" && lastUpdateTime) {
+      const timeSinceLastUpdate = Date.now() - Number.parseInt(lastUpdateTime)
+
+      // Solo procesar cambios recientes (menos de 5 segundos)
+      if (timeSinceLastUpdate < 5000) {
+        try {
+          const savedScenes = localStorage.getItem(`storynema_scenes_${projectId}`)
+          if (savedScenes) {
+            const parsedScenes = JSON.parse(savedScenes)
+
+            // Verificar si hay cambios reales comparando contenido y orden
+            const hasChanges =
+              parsedScenes.length !== scenesArray.length ||
+              parsedScenes.some((scene, index) => {
+                const currentScene = scenesArray[index]
+                return (
+                  !currentScene ||
+                  scene.id !== currentScene.id ||
+                  scene.title !== currentScene.title ||
+                  scene.content !== currentScene.content ||
+                  scene.order_index !== currentScene.order_index
+                )
+              })
+
+            if (hasChanges) {
+              console.log("Detectados cambios desde el storyboard, actualizando editor de guiones")
+              // Ordenar las escenas por order_index antes de actualizar
+              const sortedScenes = [...parsedScenes].sort((a, b) => {
+                if (a.order_index !== undefined && b.order_index !== undefined) {
+                  return a.order_index - b.order_index
                 }
-              }}
-              disabled={!isAuthenticated}
-            >
-              <Sparkles className="h-4 w-4 mr-2" />
-              Crear con IA
-            </Button>
-          </div>
+                return 0
+              })
+              setScenesArray(sortedScenes)
+            }
+          }
+        } catch (error) {
+          console.error("Error checking for storyboard changes:", error)
+        }
+      }
+    }
+
+    // Ejecutar este efecto solo cuando cambie el projectId
+    // No incluir scenesArray en las dependencias para evitar bucles
+  }, [projectId])
+
+  if (!scenesArray || scenesArray.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center h-64 gap-4 bg-[#252525] border border-[#333333] rounded-md p-6">
+        <p className="text-gray-400 mb-4">No hay escenas disponibles. Crea una nueva para comenzar.</p>
+        <div className="flex gap-4">
+          <Button onClick={addNewScene} className="bg-amber-600 hover:bg-amber-700 text-white">
+            <PlusCircle className="h-4 w-4 mr-2" />
+            Escribir nueva escena
+          </Button>
+          <Button
+            variant="outline"
+            className="bg-[#2A2A2A] border-[#444444] text-gray-200 hover:bg-[#3A3A3A]"
+            onClick={() => {
+              addNewScene()
+              if (setGeneratedContent) {
+                setGeneratedContent(
+                  "ESCENA 1 - INTERIOR. OFICINA - DÍA\n\nUna oficina moderna y minimalista. JUAN (35) está sentado frente a su computadora, concentrado en su trabajo.",
+                )
+              }
+            }}
+          >
+            <Sparkles className="h-4 w-4 mr-2" />
+            Crear con IA
+          </Button>
         </div>
       </div>
     )
   }
 
-  const handleSelectVersion = (versionId: number) => {
-    setSelectedVersionId(versionId)
-  }
-
   return (
-    <div className="space-y-4">
-      <StatusIndicator />
-      <DebugLoggerComponent />
-
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <div className="md:col-span-1">
-          <Card className="bg-[#1E1E1E] border-[#333333]">
-            <CardContent className="p-4">
-              <div className="flex justify-between items-center mb-4">
-                <h3 className="font-medium text-gray-200">Escenas</h3>
-                <div className="flex items-center gap-1">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={reverseScenes}
-                    className="h-8 w-8 p-0 text-gray-400 hover:text-white"
-                    title="Invertir orden de escenas"
-                  >
-                    <FlipVertical className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => setIsReordering(!isReordering)}
-                    className={`h-8 w-8 p-0 ${isReordering ? "text-amber-500" : "text-gray-400 hover:text-white"}`}
-                    title={isReordering ? "Finalizar reordenamiento" : "Reordenar escenas"}
-                  >
-                    <GripVertical className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={addNewScene}
-                    className="h-8 w-8 p-0 text-gray-400 hover:text-white"
-                    title="Añadir nueva escena"
-                    disabled={!isAuthenticated}
-                  >
-                    <PlusCircle className="h-4 w-4" />
-                  </Button>
-                </div>
+    // Resto del componente sin cambios...
+    <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mt-4">
+      {/* Contenido del componente sin cambios */}
+      <div className="md:col-span-1">
+        <Card className="bg-[#1E1E1E] border-[#333333]">
+          <CardContent className="p-4">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="font-medium text-gray-200">Escenas</h3>
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={reverseScenes}
+                  className="h-8 w-8 p-0 text-gray-400 hover:text-white"
+                  title="Invertir orden de escenas"
+                >
+                  <FlipVertical className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setIsReordering(!isReordering)}
+                  className={`h-8 w-8 p-0 ${isReordering ? "text-amber-500" : "text-gray-400 hover:text-white"}`}
+                  title={isReordering ? "Finalizar reordenamiento" : "Reordenar escenas"}
+                >
+                  <GripVertical className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={addNewScene}
+                  className="h-8 w-8 p-0 text-gray-400 hover:text-white"
+                  title="Añadir nueva escena"
+                >
+                  <PlusCircle className="h-4 w-4" />
+                </Button>
               </div>
-              <div className="space-y-2">
-                {scenes.map((scene, index) => (
+            </div>
+            <div className="space-y-2">
+              {scenesArray
+                .sort((a, b) => a.order_index - b.order_index)
+                .map((scene, index) => (
                   <div
                     key={scene.id}
                     className={`p-2 rounded-md cursor-pointer flex justify-between items-center ${
@@ -1265,14 +1034,14 @@ export function ScriptEditor({
                               moveSceneDown(index)
                             }}
                             className="h-6 w-6 p-0 text-gray-400 hover:text-white"
-                            disabled={index === scenes.length - 1}
+                            disabled={index === scenesArray.length - 1}
                             title="Mover abajo"
                           >
                             <MoveDown className="h-3 w-3" />
                           </Button>
                         </>
                       )}
-                      {scenes.length > 1 && (
+                      {scenesArray.length > 1 && (
                         <Button
                           variant="ghost"
                           size="icon"
@@ -1289,477 +1058,470 @@ export function ScriptEditor({
                     </div>
                   </div>
                 ))}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="mt-4 bg-[#1E1E1E] border-[#333333]">
+          <CardContent className="p-4">
+            <div>
+              <div className="flex justify-between items-center mb-2">
+                <Button
+                  variant="ghost"
+                  className="flex items-center justify-between w-full p-0 text-gray-200 hover:bg-transparent hover:text-white"
+                  onClick={() => setIsVersionsOpen(!isVersionsOpen)}
+                >
+                  <div className="flex items-center gap-2">
+                    <History className="h-4 w-4 text-gray-400" />
+                    <span className="font-medium">Historial de versiones</span>
+                  </div>
+                  <ChevronDown
+                    className={`h-4 w-4 transition-transform ${isVersionsOpen ? "transform rotate-180" : ""}`}
+                  />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setShowSaveDialog(true)}
+                  className="h-8 w-8 p-0 text-gray-400 hover:text-white"
+                >
+                  <Save className="h-4 w-4" />
+                </Button>
               </div>
-            </CardContent>
-          </Card>
 
-          <Card className="mt-4 bg-[#1E1E1E] border-[#333333]">
-            <CardContent className="p-4">
-              <div>
-                <div className="flex justify-between items-center mb-2">
-                  <Button
-                    variant="ghost"
-                    className="flex items-center justify-between w-full p-0 text-gray-200 hover:bg-transparent hover:text-white"
-                    onClick={() => setIsVersionsOpen(!isVersionsOpen)}
-                  >
-                    <div className="flex items-center gap-2">
-                      <History className="h-4 w-4 text-gray-400" />
-                      <span className="font-medium">Historial de versiones</span>
-                    </div>
-                    <ChevronDown
-                      className={`h-4 w-4 transition-transform ${isVersionsOpen ? "transform rotate-180" : ""}`}
-                    />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => setShowSaveDialog(true)}
-                    className="h-8 w-8 p-0 text-gray-400 hover:text-white"
-                  >
-                    <Save className="h-4 w-4" />
-                  </Button>
-                </div>
-
-                {isVersionsOpen && (
-                  <div className="space-y-2 mt-2">
-                    {versions.map((version) => (
-                      <div
-                        key={version.id}
-                        className={`p-2 rounded-md bg-[#252525] border border-[#333333] cursor-pointer ${
-                          selectedVersionId === version.id ? "border-amber-500" : ""
-                        }`}
-                        onClick={() => handleSelectVersion(version.id)}
-                      >
-                        <div className="flex justify-between items-center mb-1">
-                          <span className="text-xs text-gray-400">{version.date}</span>
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-6 w-6 p-0 text-gray-400 hover:text-white"
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                <MoreHorizontal className="h-3 w-3" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent className="bg-[#2A2A2A] border-[#444444] text-gray-200">
-                              <DropdownMenuItem
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  loadVersion(version)
-                                }}
-                                className="cursor-pointer hover:bg-[#3A3A3A]"
-                              >
-                                <Check className="h-4 w-4 mr-2" />
-                                Cargar
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  startEditingVersionName(version)
-                                }}
-                                className="cursor-pointer hover:bg-[#3A3A3A]"
-                              >
-                                <Edit className="h-4 w-4 mr-2" />
-                                Renombrar
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  duplicateVersion(version)
-                                }}
-                                className="cursor-pointer hover:bg-[#3A3A3A]"
-                              >
-                                <Copy className="h-4 w-4 mr-2" />
-                                Duplicar
-                              </DropdownMenuItem>
-                              {versions.length > 1 && (
-                                <DropdownMenuItem
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    deleteVersion(version.id)
-                                  }}
-                                  className="cursor-pointer text-red-400 hover:bg-[#3A3A3A] hover:text-red-300"
-                                >
-                                  <Trash className="h-4 w-4 mr-2" />
-                                  Eliminar
-                                </DropdownMenuItem>
-                              )}
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </div>
-                        {editingVersionId === version.id ? (
-                          <div className="flex gap-2 mt-1">
-                            <Input
-                              value={editingVersionName}
-                              onChange={(e) => setEditingVersionName(e.target.value)}
-                              className="bg-[#2A2A2A] border-[#444444] text-gray-200 text-sm"
-                              autoFocus
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter") {
-                                  saveVersionName(version.id)
-                                } else if (e.key === "Escape") {
-                                  cancelEditingVersionName()
-                                }
-                              }}
+              {isVersionsOpen && (
+                <div className="space-y-2 mt-2">
+                  {versions.map((version) => (
+                    <div
+                      key={version.id}
+                      className={`p-2 rounded-md bg-[#252525] border border-[#333333] cursor-pointer ${
+                        selectedVersionId === version.id ? "border-amber-500" : ""
+                      }`}
+                      onClick={() => handleSelectVersion(version.id)}
+                    >
+                      <div className="flex justify-between items-center mb-1">
+                        <span className="text-xs text-gray-400">{version.date}</span>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6 p-0 text-gray-400 hover:text-white"
                               onClick={(e) => e.stopPropagation()}
-                            />
-                            <Button
-                              size="sm"
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                saveVersionName(version.id)
-                              }}
-                              className="bg-amber-600 hover:bg-amber-700 text-white"
                             >
-                              <Check className="h-4 w-4" />
+                              <MoreHorizontal className="h-3 w-3" />
                             </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                cancelEditingVersionName()
-                              }}
-                              className="bg-[#2A2A2A] border-[#444444] text-gray-200"
-                            >
-                              <X className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        ) : (
-                          <div className="text-sm text-gray-300">{version.description}</div>
-                        )}
-                        {selectedVersionId === version.id && !editingVersionId && (
-                          <div className="mt-2 flex justify-end">
-                            <Button
-                              size="sm"
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent className="bg-[#2A2A2A] border-[#444444] text-gray-200">
+                            <DropdownMenuItem
                               onClick={(e) => {
                                 e.stopPropagation()
                                 loadVersion(version)
                               }}
-                              className="bg-amber-600 hover:bg-amber-700 text-white text-xs"
+                              className="cursor-pointer hover:bg-[#3A3A3A]"
                             >
-                              Cargar esta versión
-                            </Button>
-                          </div>
-                        )}
+                              <Check className="h-4 w-4 mr-2" />
+                              Cargar
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                startEditingVersionName(version)
+                              }}
+                              className="cursor-pointer hover:bg-[#3A3A3A]"
+                            >
+                              <Edit className="h-4 w-4 mr-2" />
+                              Renombrar
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                duplicateVersion(version)
+                              }}
+                              className="cursor-pointer hover:bg-[#3A3A3A]"
+                            >
+                              <Copy className="h-4 w-4 mr-2" />
+                              Duplicar
+                            </DropdownMenuItem>
+                            {versions.length > 1 && (
+                              <DropdownMenuItem
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  deleteVersion(version.id)
+                                }}
+                                className="cursor-pointer text-red-400 hover:bg-[#3A3A3A] hover:text-red-300"
+                              >
+                                <Trash className="h-4 w-4 mr-2" />
+                                Eliminar
+                              </DropdownMenuItem>
+                            )}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <SaveVersionDialog />
-            </CardContent>
-          </Card>
-        </div>
+                      {editingVersionId === version.id ? (
+                        <div className="flex gap-2 mt-1">
+                          <Input
+                            value={editingVersionName}
+                            onChange={(e) => setEditingVersionName(e.target.value)}
+                            className="bg-[#2A2A2A] border-[#444444] text-gray-200 text-sm"
+                            autoFocus
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                saveVersionName(version.id)
+                              } else if (e.key === "Escape") {
+                                cancelEditingVersionName()
+                              }
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                          <Button
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              saveVersionName(version.id)
+                            }}
+                            className="bg-amber-600 hover:bg-amber-700 text-white"
+                          >
+                            <Check className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              cancelEditingVersionName()
+                            }}
+                            className="bg-[#2A2A2A] border-[#444444] text-gray-200"
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className="text-sm text-gray-300">{version.description}</div>
+                      )}
+                      {selectedVersionId === version.id && !editingVersionId && (
+                        <div className="mt-2 flex justify-end">
+                          <Button
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              loadVersion(version)
+                            }}
+                            className="bg-amber-600 hover:bg-amber-700 text-white text-xs"
+                          >
+                            Cargar esta versión
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <SaveVersionDialog />
+          </CardContent>
+        </Card>
+      </div>
 
-        <div className="md:col-span-3">
-          <Card className="bg-[#1E1E1E] border-[#333333]">
-            <CardContent className="p-4">
-              <Tabs defaultValue="editor">
-                <div className="flex justify-between items-center mb-4">
-                  <TabsList className="bg-[#2A2A2A]">
-                    <TabsTrigger
-                      value="editor"
-                      className="flex items-center gap-1 data-[state=active]:bg-[#3A3A3A] text-gray-300"
-                    >
-                      <BookOpen className="h-4 w-4" />
-                      Editor
-                    </TabsTrigger>
-                    <TabsTrigger
-                      value="full-script"
-                      className="flex items-center gap-1 data-[state=active]:bg-[#3A3A3A] text-gray-300"
-                    >
-                      <FileText className="h-4 w-4" />
-                      Guion completo
-                    </TabsTrigger>
-                    <TabsTrigger
-                      value="ai-assist"
-                      className="flex items-center gap-1 data-[state=active]:bg-[#3A3A3A] text-gray-300"
-                    >
-                      <Sparkles className="h-4 w-4" />
-                      Asistente IA
-                    </TabsTrigger>
-                    <TabsTrigger
-                      value="comments"
-                      className="flex items-center gap-1 data-[state=active]:bg-[#3A3A3A] text-gray-300"
-                    >
-                      <MessageSquare className="h-4 w-4" />
-                      Comentarios
-                    </TabsTrigger>
-                  </TabsList>
+      <div className="md:col-span-3">
+        <Card className="bg-[#1E1E1E] border-[#333333]">
+          <CardContent className="p-4">
+            <Tabs defaultValue="editor">
+              <div className="flex justify-between items-center mb-4">
+                <TabsList className="bg-[#2A2A2A]">
+                  <TabsTrigger
+                    value="editor"
+                    className="flex items-center gap-1 data-[state=active]:bg-[#3A3A3A] text-gray-300"
+                  >
+                    <BookOpen className="h-4 w-4" />
+                    Editor
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="full-script"
+                    className="flex items-center gap-1 data-[state=active]:bg-[#3A3A3A] text-gray-300"
+                  >
+                    <FileText className="h-4 w-4" />
+                    Guion completo
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="ai-assist"
+                    className="flex items-center gap-1 data-[state=active]:bg-[#3A3A3A] text-gray-300"
+                  >
+                    <Sparkles className="h-4 w-4" />
+                    Asistente IA
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="comments"
+                    className="flex items-center gap-1 data-[state=active]:bg-[#3A3A3A] text-gray-300"
+                  >
+                    <MessageSquare className="h-4 w-4" />
+                    Comentarios
+                  </TabsTrigger>
+                </TabsList>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="flex items-center gap-1 bg-[#2A2A2A] border-[#444444] text-gray-200 hover:bg-[#3A3A3A]"
+                    onClick={exportToPDF}
+                  >
+                    <Download className="h-4 w-4" />
+                    Exportar
+                  </Button>
+                </div>
+              </div>
+
+              <TabsContent value="editor" className="space-y-4 relative">
+                <div>
+                  <Label htmlFor="scene-title" className="text-gray-300">
+                    Título de la escena
+                  </Label>
+                  <Input
+                    id="scene-title"
+                    value={activeScene.title}
+                    onChange={(e) => handleSceneTitleChange(e.target.value)}
+                    className="bg-[#2A2A2A] border-[#444444] text-gray-200"
+                  />
+                </div>
+
+                {/* Barra de herramientas fija con deshacer/rehacer */}
+                <div className="flex justify-between items-center p-2 border rounded-md bg-[#2A2A2A] border-[#444444]">
                   <div className="flex items-center gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="flex items-center gap-1 bg-[#2A2A2A] border-[#444444] text-gray-200 hover:bg-[#3A3A3A]"
-                      onClick={exportToPDF}
-                    >
-                      <Download className="h-4 w-4" />
-                      Exportar
-                    </Button>
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-gray-300 hover:text-white hover:bg-[#3A3A3A]"
+                            onClick={handleUndo}
+                            disabled={historyIndex <= 0}
+                          >
+                            <Undo className="h-4 w-4" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>Deshacer</TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-gray-300 hover:text-white hover:bg-[#3A3A3A]"
+                            onClick={handleRedo}
+                            disabled={historyIndex >= history.length - 1}
+                          >
+                            <Redo className="h-4 w-4" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>Rehacer</TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+
+                    <div className="h-6 w-px bg-[#444444] mx-1"></div>
+
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-gray-300 hover:text-white hover:bg-[#3A3A3A]"
+                            onClick={() => setPreviewMode(!previewMode)}
+                          >
+                            <Eye className="h-4 w-4" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>Vista previa</TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  </div>
+
+                  <div className="text-xs text-gray-400">Selecciona texto para ver opciones de formato</div>
+                </div>
+
+                <div>
+                  <Label htmlFor="scene-content" className="text-gray-300">
+                    Contenido
+                  </Label>
+                  <div className="relative">
+                    {previewMode ? (
+                      <div className="min-h-[400px] p-4 font-mono bg-[#2A2A2A] border border-[#444444] rounded-md text-gray-200 overflow-auto">
+                        <MarkdownRenderer content={activeScene.content} />
+                      </div>
+                    ) : (
+                      <Textarea
+                        id="scene-content"
+                        value={activeScene.content}
+                        onChange={(e) => handleSceneContentChange(e.target.value)}
+                        ref={textareaRef}
+                        className="min-h-[400px] font-mono bg-[#2A2A2A] border-[#444444] text-gray-200"
+                        placeholder="Escribe aquí el contenido de tu escena..."
+                      />
+                    )}
+                    <FloatingToolbar />
+                  </div>
+                </div>
+              </TabsContent>
+
+              <TabsContent value="full-script">
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="font-medium text-gray-200">Guion completo</h3>
+                  <Dialog>
+                    <DialogTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        className="bg-[#2A2A2A] border-[#444444] text-gray-200 hover:bg-[#3A3A3A]"
+                      >
+                        <Maximize2 className="h-4 w-4" />
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent className="max-w-4xl h-[80vh] bg-[#1E1E1E] border-[#333333]">
+                      <DialogHeader>
+                        <DialogTitle className="text-gray-200">Guion completo</DialogTitle>
+                        <DialogDescription className="text-gray-400">
+                          Vista completa del guion para lectura
+                        </DialogDescription>
+                      </DialogHeader>
+                      <ScrollArea className="h-full pr-4">
+                        <div className="font-mono whitespace-pre-wrap p-4 text-gray-200">
+                          <MarkdownRenderer content={getFullScript()} />
+                        </div>
+                      </ScrollArea>
+                    </DialogContent>
+                  </Dialog>
+                </div>
+                <ScrollArea className="h-[500px] pr-4 border rounded-md bg-[#2A2A2A] border-[#444444]">
+                  <div className="font-mono whitespace-pre-wrap p-4 text-gray-200">
+                    <MarkdownRenderer content={getFullScript()} />
+                  </div>
+                </ScrollArea>
+              </TabsContent>
+
+              <TabsContent value="ai-assist" className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <Label className="text-gray-300">Modelo de IA</Label>
+                    <Select defaultValue="gemini-2.0-flash-001">
+                      <SelectTrigger className="bg-[#2A2A2A] border-[#444444] text-gray-200">
+                        <SelectValue placeholder="Seleccionar modelo" />
+                      </SelectTrigger>
+                      <SelectContent className="bg-[#2A2A2A] border-[#444444] text-gray-200">
+                        <SelectItem value="gemini-2.0-flash-001">Google Gemini 2.0 Flash</SelectItem>
+                        <SelectItem value="gemini-pro">Google Gemini Pro</SelectItem>
+                        <SelectItem value="gpt4">OpenAI GPT-4</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label className="text-gray-300">Género</Label>
+                    <Select defaultValue="drama">
+                      <SelectTrigger className="bg-[#2A2A2A] border-[#444444] text-gray-200">
+                        <SelectValue placeholder="Seleccionar género" />
+                      </SelectTrigger>
+                      <SelectContent className="bg-[#2A2A2A] border-[#444444] text-gray-200">
+                        <SelectItem value="drama">Drama</SelectItem>
+                        <SelectItem value="comedy">Comedia</SelectItem>
+                        <SelectItem value="thriller">Thriller</SelectItem>
+                        <SelectItem value="scifi">Ciencia Ficción</SelectItem>
+                        <SelectItem value="romance">Romance</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
 
-                <TabsContent value="editor" className="space-y-4 relative">
-                  <div>
-                    <Label htmlFor="scene-title" className="text-gray-300">
-                      Título de la escena
-                    </Label>
-                    <Input
-                      id="scene-title"
-                      value={activeScene.title}
-                      onChange={(e) => handleSceneTitleChange(e.target.value)}
-                      className="bg-[#2A2A2A] border-[#444444] text-gray-200"
-                      disabled={!isAuthenticated}
-                    />
-                  </div>
+                <div>
+                  <Label className="text-gray-300">Instrucciones para la IA</Label>
+                  <Textarea
+                    id="ai-prompt"
+                    placeholder="Describe lo que quieres que la IA genere o modifique..."
+                    value={aiPrompt}
+                    onChange={(e) => setAiPrompt(e.target.value)}
+                    className="min-h-[100px] bg-[#2A2A2A] border-[#444444] text-gray-200 placeholder:text-gray-500"
+                  />
+                </div>
 
-                  <div className="flex justify-between items-center p-2 border rounded-md bg-[#2A2A2A] border-[#444444]">
-                    <div className="flex items-center gap-2">
-                      <TooltipProvider>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8 text-gray-300 hover:text-white hover:bg-[#3A3A3A]"
-                              onClick={handleUndo}
-                              disabled={historyIndex <= 0}
-                            >
-                              <Undo className="h-4 w-4" />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>Deshacer</TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
-
-                      <TooltipProvider>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8 text-gray-300 hover:text-white hover:bg-[#3A3A3A]"
-                              onClick={handleRedo}
-                              disabled={historyIndex >= history.length - 1}
-                            >
-                              <Redo className="h-4 w-4" />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>Rehacer</TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
-
-                      <div className="h-6 w-px bg-[#444444] mx-1"></div>
-
-                      <TooltipProvider>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8 text-gray-300 hover:text-white hover:bg-[#3A3A3A]"
-                              onClick={() => setPreviewMode(!previewMode)}
-                            >
-                              <Eye className="h-4 w-4" />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>Vista previa</TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
-                    </div>
-
-                    <div className="text-xs text-gray-400">
-                      {!isAuthenticated
-                        ? "Modo solo lectura - Inicia sesión para editar"
-                        : "Selecciona texto para ver opciones de formato"}
-                    </div>
-                  </div>
-
-                  <div>
-                    <Label htmlFor="scene-content" className="text-gray-300">
-                      Contenido
-                    </Label>
-                    <div className="relative">
-                      {previewMode ? (
-                        <div className="min-h-[400px] p-4 font-mono bg-[#2A2A2A] border border-[#444444] rounded-md text-gray-200 overflow-auto">
-                          <MarkdownRenderer content={activeScene.content} />
-                        </div>
-                      ) : (
-                        <Textarea
-                          id="scene-content"
-                          value={activeScene.content}
-                          onChange={(e) => handleSceneContentChange(e.target.value)}
-                          ref={textareaRef}
-                          className="min-h-[400px] font-mono bg-[#2A2A2A] border-[#444444] text-gray-200"
-                          placeholder="Escribe aquí el contenido de tu escena..."
-                          disabled={!isAuthenticated}
-                        />
-                      )}
-                      <FloatingToolbar />
-                    </div>
-                  </div>
-                </TabsContent>
-
-                <TabsContent value="full-script">
-                  <div className="flex justify-between items-center mb-4">
-                    <h3 className="font-medium text-gray-200">Guion completo</h3>
-                    <Dialog>
-                      <DialogTrigger asChild>
-                        <Button
-                          variant="outline"
-                          size="icon"
-                          className="bg-[#2A2A2A] border-[#444444] text-gray-200 hover:bg-[#3A3A3A]"
-                        >
-                          <Maximize2 className="h-4 w-4" />
-                        </Button>
-                      </DialogTrigger>
-                      <DialogContent className="max-w-4xl h-[80vh] bg-[#1E1E1E] border-[#333333]">
-                        <DialogHeader>
-                          <DialogTitle className="text-gray-200">Guion completo</DialogTitle>
-                          <DialogDescription className="text-gray-400">
-                            Vista completa del guion para lectura
-                          </DialogDescription>
-                        </DialogHeader>
-                        <ScrollArea className="h-full pr-4">
-                          <div className="font-mono whitespace-pre-wrap p-4 text-gray-200">
-                            <MarkdownRenderer content={getFullScript()} />
-                          </div>
-                        </ScrollArea>
-                      </DialogContent>
-                    </Dialog>
-                  </div>
-                  <ScrollArea className="h-[500px] pr-4 border rounded-md bg-[#2A2A2A] border-[#444444]">
-                    <div className="font-mono whitespace-pre-wrap p-4 text-gray-200">
-                      <MarkdownRenderer content={getFullScript()} />
-                    </div>
-                  </ScrollArea>
-                </TabsContent>
-
-                <TabsContent value="ai-assist" className="space-y-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <Label className="text-gray-300">Modelo de IA</Label>
-                      <Select defaultValue="gemini-2.0-flash-001" disabled={!isAuthenticated || !isOnline}>
-                        <SelectTrigger className="bg-[#2A2A2A] border-[#444444] text-gray-200">
-                          <SelectValue placeholder="Seleccionar modelo" />
-                        </SelectTrigger>
-                        <SelectContent className="bg-[#2A2A2A] border-[#444444] text-gray-200">
-                          <SelectItem value="gemini-2.0-flash-001">Google Gemini 2.0 Flash</SelectItem>
-                          <SelectItem value="gemini-pro">Google Gemini Pro</SelectItem>
-                          <SelectItem value="gpt4">OpenAI GPT-4</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div>
-                      <Label className="text-gray-300">Género</Label>
-                      <Select defaultValue="drama" disabled={!isAuthenticated || !isOnline}>
-                        <SelectTrigger className="bg-[#2A2A2A] border-[#444444] text-gray-200">
-                          <SelectValue placeholder="Seleccionar género" />
-                        </SelectTrigger>
-                        <SelectContent className="bg-[#2A2A2A] border-[#444444] text-gray-200">
-                          <SelectItem value="drama">Drama</SelectItem>
-                          <SelectItem value="comedy">Comedia</SelectItem>
-                          <SelectItem value="thriller">Thriller</SelectItem>
-                          <SelectItem value="scifi">Ciencia Ficción</SelectItem>
-                          <SelectItem value="romance">Romance</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-
-                  <div>
-                    <Label className="text-gray-300">Instrucciones para la IA</Label>
-                    <Textarea
-                      id="ai-prompt"
-                      placeholder="Describe lo que quieres que la IA genere o modifique..."
-                      value={aiPrompt}
-                      onChange={(e) => setAiPrompt(e.target.value)}
-                      className="min-h-[100px] bg-[#2A2A2A] border-[#444444] text-gray-200 placeholder:text-gray-500"
-                      disabled={!isAuthenticated || !isOnline}
-                    />
-                  </div>
-
+                <div className="space-y-2">
+                  <Label className="text-gray-300">Sugerencias de la IA</Label>
                   <div className="space-y-2">
-                    <Label className="text-gray-300">Sugerencias de la IA</Label>
-                    <div className="space-y-2">
-                      {aiSuggestions.map((suggestion, index) => (
-                        <Card
-                          key={index}
-                          className="p-3 hover:bg-[#2A2A2A] cursor-pointer bg-[#252525] border-[#444444] text-gray-200"
-                          onClick={() => onApplySuggestion && onApplySuggestion(suggestion)}
-                        >
-                          <p className="text-sm">{suggestion}</p>
-                        </Card>
-                      ))}
+                    {aiSuggestions.map((suggestion, index) => (
+                      <Card
+                        key={index}
+                        className="p-3 hover:bg-[#2A2A2A] cursor-pointer bg-[#252525] border-[#444444] text-gray-200"
+                        onClick={() => onApplySuggestion && onApplySuggestion(suggestion)}
+                      >
+                        <p className="text-sm">{suggestion}</p>
+                      </Card>
+                    ))}
+                  </div>
+                </div>
+
+                <Button
+                  className="w-full bg-amber-600 hover:bg-amber-700 text-white"
+                  onClick={generateWithAI}
+                  disabled={isGenerating}
+                >
+                  <Wand2 className="h-4 w-4 mr-2" />
+                  {isGenerating ? "Generando..." : "Generar con IA"}
+                </Button>
+              </TabsContent>
+
+              <TabsContent value="comments" className="space-y-4">
+                <div className="space-y-4">
+                  <div className="flex items-start gap-3">
+                    <div className="w-8 h-8 rounded-full bg-[#3A3A3A] flex items-center justify-center text-xs font-medium text-gray-200">
+                      CR
+                    </div>
+                    <div className="flex-1">
+                      <div className="bg-[#2A2A2A] p-3 rounded-lg">
+                        <p className="text-sm font-medium mb-1 text-gray-200">Carlos Rodríguez</p>
+                        <p className="text-sm text-gray-300">
+                          Creo que podríamos hacer que Juan llegue aún más tarde para aumentar la tensión en la escena
+                          de la oficina.
+                        </p>
+                      </div>
+                      <p className="text-xs text-gray-400 mt-1">Hace 2 horas</p>
                     </div>
                   </div>
 
-                  <Button
-                    className="w-full bg-amber-600 hover:bg-amber-700 text-white"
-                    onClick={generateWithAI}
-                    disabled={isGenerating || !isAuthenticated || !isOnline}
-                  >
-                    <Wand2 className="h-4 w-4 mr-2" />
-                    {isGenerating ? "Generando..." : "Generar con IA"}
-                  </Button>
-                </TabsContent>
-
-                <TabsContent value="comments" className="space-y-4">
-                  <div className="space-y-4">
-                    <div className="flex items-start gap-3">
-                      <div className="w-8 h-8 rounded-full bg-[#3A3A3A] flex items-center justify-center text-xs font-medium text-gray-200">
-                        CR
-                      </div>
-                      <div className="flex-1">
-                        <div className="bg-[#2A2A2A] p-3 rounded-lg">
-                          <p className="text-sm font-medium mb-1 text-gray-200">Carlos Rodríguez</p>
-                          <p className="text-sm text-gray-300">
-                            Creo que podríamos hacer que Juan llegue aún más tarde para aumentar la tensión en la escena
-                            de la oficina.
-                          </p>
-                        </div>
-                        <p className="text-xs text-gray-400 mt-1">Hace 2 horas</p>
-                      </div>
+                  <div className="flex items-start gap-3">
+                    <div className="w-8 h-8 rounded-full bg-[#3A3A3A] flex items-center justify-center text-xs font-medium text-gray-200">
+                      AL
                     </div>
-
-                    <div className="flex items-start gap-3">
-                      <div className="w-8 h-8 rounded-full bg-[#3A3A3A] flex items-center justify-center text-xs font-medium text-gray-200">
-                        AL
+                    <div className="flex-1">
+                      <div className="bg-[#2A2A2A] p-3 rounded-lg">
+                        <p className="text-sm font-medium mb-1 text-gray-200">Ana López</p>
+                        <p className="text-sm text-gray-300">
+                          ¿Y si añadimos que María está esperando unos documentos importantes que Juan debía traer?
+                        </p>
                       </div>
-                      <div className="flex-1">
-                        <div className="bg-[#2A2A2A] p-3 rounded-lg">
-                          <p className="text-sm font-medium mb-1 text-gray-200">Ana López</p>
-                          <p className="text-sm text-gray-300">
-                            ¿Y si añadimos que María está esperando unos documentos importantes que Juan debía traer?
-                          </p>
-                        </div>
-                        <p className="text-xs text-gray-400 mt-1">Ayer</p>
-                      </div>
+                      <p className="text-xs text-gray-400 mt-1">Ayer</p>
                     </div>
                   </div>
+                </div>
 
-                  <div className="flex items-center gap-2">
-                    <Textarea
-                      placeholder="Añadir un comentario..."
-                      className="min-h-[80px] bg-[#2A2A2A] border-[#444444] text-gray-200 placeholder:text-gray-500"
-                      disabled={!isAuthenticated}
-                    />
-                  </div>
-                  <Button className="bg-amber-600 hover:bg-amber-700 text-white" disabled={!isAuthenticated}>
-                    <MessageSquare className="h-4 w-4 mr-2" />
-                    Enviar comentario
-                  </Button>
-                </TabsContent>
-              </Tabs>
-            </CardContent>
-          </Card>
-        </div>
+                <div className="flex items-center gap-2">
+                  <Textarea
+                    placeholder="Añadir un comentario..."
+                    className="min-h-[80px] bg-[#2A2A2A] border-[#444444] text-gray-200 placeholder:text-gray-500"
+                  />
+                </div>
+                <Button className="bg-amber-600 hover:bg-amber-700 text-white">
+                  <MessageSquare className="h-4 w-4 mr-2" />
+                  Enviar comentario
+                </Button>
+              </TabsContent>
+            </Tabs>
+          </CardContent>
+        </Card>
       </div>
     </div>
   )
 }
 
+// Exportar el componente como predeterminado también
 export default ScriptEditor
