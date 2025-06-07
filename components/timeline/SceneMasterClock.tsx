@@ -2,42 +2,47 @@
 
 import type React from "react"
 import { useState, useEffect, useRef, useCallback } from "react"
-import type { Scene } from "../../types"
-import { formatTime } from "../../utils/time"
+import { Button } from "@/components/ui/button"
+import { Play, Pause } from "lucide-react"
 import styles from "./SceneMasterClock.module.css"
 
 interface SceneMasterClockProps {
-  scenes: Scene[]
+  scenes: any[]
   activeSceneIndex: number
   setActiveScene: (index: number) => void
+  activeImageIndex?: number
   isPlaying?: boolean
   onTogglePlayPause?: () => void
   currentTime?: number
-  onTimeUpdate?: (sceneIndex: number, time: number, accumulatedTime?: number, totalProjectDuration?: number) => void
-  activeImageIndex?: number // Añadir esta prop opcional
-  onSeek?: (time: number) => void // Añadir esta prop opcional
-  onGoToShot?: (sceneIndex: number, imageIndex: number, syncAudio?: boolean) => void // Añadir esta prop opcional
+  onTimeUpdate?: (sceneIndex: number, time: number, accumulatedTime?: number, totalDuration?: number) => void
+  onSeek?: (time: number) => void
+  onGoToShot?: (sceneIndex: number, imageIndex: number, syncAudio?: boolean) => void
 }
 
-export default function SceneMasterClock({
+const SceneMasterClock: React.FC<SceneMasterClockProps> = ({
   scenes,
   activeSceneIndex,
   setActiveScene,
+  activeImageIndex = 0,
   isPlaying = false,
   onTogglePlayPause,
   currentTime = 0,
   onTimeUpdate,
-  activeImageIndex,
   onSeek,
   onGoToShot,
-}: SceneMasterClockProps) {
-  const [currentSceneTime, setCurrentSceneTime] = useState(0)
+}) => {
+  // Estado local
+  const [sceneTime, setSceneTime] = useState(0)
   const [sceneDurations, setSceneDurations] = useState<number[]>([])
   const [projectDuration, setProjectDuration] = useState(0)
   const [isLocked, setIsLocked] = useState(false)
-  const progressBarRef = useRef<HTMLDivElement>(null)
 
-  // Agregar esta función después de la declaración de estados
+  // Referencias
+  const progressBarRef = useRef<HTMLDivElement>(null)
+  const lastActiveSceneIndexRef = useRef<number>(activeSceneIndex)
+  const timeUpdateTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+
+  // Calcular la duración total del proyecto
   const calculateTotalProjectDuration = useCallback(() => {
     return scenes.reduce((total, scene) => {
       if (!scene || !scene.images) return total
@@ -45,210 +50,203 @@ export default function SceneMasterClock({
     }, 0)
   }, [scenes])
 
-  // Reemplazar el useEffect existente que calcula las duraciones de escenas
+  // Calcular las duraciones de las escenas
   useEffect(() => {
-    // Asegurarse de que cada escena tenga una duración válida
-    const durations = scenes.map((scene, index) => {
-      // Si la escena no tiene duración o es 0, calcularla sumando las duraciones de sus imágenes
+    const durations = scenes.map((scene) => {
       if (!scene.duration || scene.duration === 0) {
-        const imagesDuration = scene.images?.reduce((sum, img) => sum + (img.duration || 0), 0) || 0
-        console.log(`Escena ${index}: Duración calculada de imágenes: ${imagesDuration}`)
-        return imagesDuration
+        return scene.images?.reduce((sum, img) => sum + (img.duration || 0), 0) || 0
       }
-      console.log(`Escena ${index}: Duración definida: ${scene.duration}`)
       return scene.duration
     })
 
     setSceneDurations(durations)
-
-    // Calcular la duración total de todas las escenas
-    const totalDuration = calculateTotalProjectDuration()
-    console.log("Duración total del proyecto:", totalDuration)
-    setProjectDuration(totalDuration)
+    setProjectDuration(calculateTotalProjectDuration())
   }, [scenes, calculateTotalProjectDuration])
 
+  // Actualizar el tiempo de la escena cuando cambie el tiempo actual
   useEffect(() => {
-    let timerId: NodeJS.Timeout
-
-    if (isPlaying) {
-      timerId = setInterval(() => {
-        setCurrentSceneTime((prevTime) => {
-          const newTime = prevTime + 0.1
-          if (newTime > (sceneDurations[activeSceneIndex] || 0)) {
-            if (activeSceneIndex < scenes.length - 1) {
-              // IMPORTANTE: Aquí es donde necesitamos asegurarnos de pasar el índice correcto
-              // Llamamos a setActiveScene con el índice de la siguiente escena
-              const nextSceneIndex = activeSceneIndex + 1
-              setActiveScene(nextSceneIndex)
-
-              // También notificamos al componente padre sobre el cambio de escena
-              if (onTimeUpdate) {
-                // Calcular el tiempo acumulado hasta el inicio de la siguiente escena
-                let accumulatedTime = 0
-                for (let i = 0; i < nextSceneIndex; i++) {
-                  accumulatedTime += sceneDurations[i] || 0
-                }
-
-                // Pasar el índice correcto de la escena, tiempo 0 (inicio de la escena),
-                // tiempo acumulado y duración total del proyecto
-                onTimeUpdate(nextSceneIndex, 0, accumulatedTime, projectDuration)
-              }
-
-              return 0
-            } else {
-              clearInterval(timerId)
-              return prevTime
-            }
-          }
-          return newTime
-        })
-      }, 100)
-    } else {
-      clearInterval(timerId)
-    }
-
-    return () => clearInterval(timerId)
-  }, [isPlaying, activeSceneIndex, scenes, setActiveScene, sceneDurations, onTimeUpdate, projectDuration])
-
-  useEffect(() => {
-    // Asegurarse de que currentTime sea un número válido
     const validTime = typeof currentTime === "number" && !isNaN(currentTime) ? currentTime : 0
-    console.log("Actualizando currentSceneTime:", validTime)
-    setCurrentSceneTime(validTime)
+    setSceneTime(validTime)
   }, [currentTime])
 
-  // Reemplazar la función handleSceneClick existente
-  const handleSceneClick = (index: number) => {
-    // IMPORTANTE: Asegurarnos de pasar el índice correcto de la escena
-    console.log("SceneMasterClock: Clic en escena con índice:", index)
+  // Manejar clic en una escena - CORREGIDO para evitar setState durante renderizado
+  const handleSceneClick = useCallback(
+    (index: number) => {
+      // Evitar cambios si el índice es el mismo
+      if (index === activeSceneIndex) return
 
-    // Actualizar el estado local
-    setActiveScene(index)
+      console.log(`SceneMasterClock: Cambio manual a escena ${index}`)
 
-    // Calcular el tiempo acumulado hasta el inicio de la escena seleccionada
-    let accumulatedTime = 0
-    for (let i = 0; i < index; i++) {
-      accumulatedTime += sceneDurations[i] || 0
-    }
+      // Limpiar cualquier timeout pendiente
+      if (timeUpdateTimeoutRef.current) {
+        clearTimeout(timeUpdateTimeoutRef.current)
+      }
 
-    // Establecer el tiempo actual al inicio de la escena seleccionada
-    setCurrentSceneTime(0)
+      // Actualizar el estado local
+      setActiveScene(index)
+      setSceneTime(0) // Reiniciar el tiempo de la escena a 0
 
-    // Obtener la duración total del proyecto
-    const totalProjectDuration = calculateTotalProjectDuration()
-    console.log("Selección de escena - Duración total:", totalProjectDuration)
-    console.log("Selección de escena - Tiempo acumulado:", accumulatedTime)
-    console.log("Selección de escena - Índice de escena:", index)
+      // Calcular el tiempo acumulado hasta el inicio de la escena seleccionada
+      let accumulatedTime = 0
+      for (let i = 0; i < index; i++) {
+        accumulatedTime += sceneDurations[i] || 0
+      }
 
-    // Notificar al componente padre sobre el cambio de tiempo
-    if (onTimeUpdate) {
-      // Ahora pasamos el índice de la escena, el tiempo dentro de la escena (0),
-      // y el tiempo acumulado hasta el inicio de la escena
-      onTimeUpdate(index, 0, accumulatedTime, totalProjectDuration)
-    }
-  }
+      // Usar setTimeout para evitar actualizar el estado durante el renderizado
+      timeUpdateTimeoutRef.current = setTimeout(() => {
+        if (onTimeUpdate) {
+          console.log(`SceneMasterClock: Notificando cambio a escena ${index} con tiempo acumulado ${accumulatedTime}`)
+          onTimeUpdate(index, 0, accumulatedTime, calculateTotalProjectDuration())
+        }
+      }, 0)
+    },
+    [setActiveScene, sceneDurations, calculateTotalProjectDuration, onTimeUpdate, activeSceneIndex],
+  )
 
-  const togglePlayPause = () => {
+  // Manejar reproducción/pausa
+  const togglePlayPause = useCallback(() => {
     if (onTogglePlayPause) {
       onTogglePlayPause()
     }
-  }
+  }, [onTogglePlayPause])
 
-  const seekToProjectTime = (time: number) => {
-    if (isLocked) return
+  // Buscar una posición específica en el proyecto
+  const seekToProjectTime = useCallback(
+    (time: number) => {
+      if (isLocked) return
 
-    let accumulatedTime = 0
-    for (let i = 0; i < scenes.length; i++) {
-      const sceneDuration = sceneDurations[i] || 0
-      if (time < accumulatedTime + sceneDuration) {
-        const sceneTime = time - accumulatedTime
+      let accumulatedTime = 0
+      for (let i = 0; i < scenes.length; i++) {
+        const sceneDuration = sceneDurations[i] || 0
+        if (time < accumulatedTime + sceneDuration) {
+          const sceneTime = time - accumulatedTime
 
-        // IMPORTANTE: Asegurarnos de pasar el índice correcto de la escena
-        console.log("seekToProjectTime: Seleccionando escena con índice:", i)
-        setActiveScene(i)
-        setCurrentSceneTime(sceneTime)
+          // Actualizar la escena activa
+          setActiveScene(i)
+          setSceneTime(sceneTime)
 
-        if (onTimeUpdate) {
-          // Pasar el índice correcto, el tiempo dentro de la escena,
-          // el tiempo acumulado y la duración total
-          onTimeUpdate(i, sceneTime, accumulatedTime, projectDuration)
+          // Usar setTimeout para evitar actualizar el estado durante el renderizado
+          if (timeUpdateTimeoutRef.current) {
+            clearTimeout(timeUpdateTimeoutRef.current)
+          }
+
+          timeUpdateTimeoutRef.current = setTimeout(() => {
+            if (onTimeUpdate) {
+              onTimeUpdate(i, sceneTime, accumulatedTime, projectDuration)
+            }
+          }, 0)
+
+          break
         }
-        break
+        accumulatedTime += sceneDuration
       }
-      accumulatedTime += sceneDuration
-    }
-  }
+    },
+    [isLocked, scenes, sceneDurations, setActiveScene, onTimeUpdate, projectDuration],
+  )
 
-  const handleProgressBarClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!progressBarRef.current) return
+  // Manejar clic en la barra de progreso
+  const handleProgressBarClick = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      if (!progressBarRef.current) return
 
-    const rect = progressBarRef.current.getBoundingClientRect()
-    const x = e.clientX - rect.left
-    const totalWidth = rect.width
-    const time = (x / totalWidth) * projectDuration
+      const rect = progressBarRef.current.getBoundingClientRect()
+      const x = e.clientX - rect.left
+      const totalWidth = rect.width
+      const time = (x / totalWidth) * projectDuration
 
-    seekToProjectTime(time)
-  }
+      seekToProjectTime(time)
+    },
+    [projectDuration, seekToProjectTime],
+  )
 
-  const calculateProgress = () => {
+  // Calcular el progreso actual
+  const calculateProgress = useCallback(() => {
     let accumulatedTime = 0
     for (let i = 0; i < activeSceneIndex; i++) {
       accumulatedTime += sceneDurations[i] || 0
     }
-    accumulatedTime += currentSceneTime
+    accumulatedTime += sceneTime
     return (accumulatedTime / projectDuration) * 100
-  }
+  }, [activeSceneIndex, sceneTime, sceneDurations, projectDuration])
 
-  const getSceneDuration = (sceneIndex: number): number => {
-    if (!scenes[sceneIndex]) return 0
+  // Obtener la duración de una escena
+  const getSceneDuration = useCallback(
+    (sceneIndex: number): number => {
+      if (!scenes[sceneIndex]) return 0
 
-    // Si la escena tiene duración definida, usarla
-    if (scenes[sceneIndex].duration && scenes[sceneIndex].duration > 0) {
-      return scenes[sceneIndex].duration
+      if (scenes[sceneIndex].duration && scenes[sceneIndex].duration > 0) {
+        return scenes[sceneIndex].duration
+      }
+
+      const images = scenes[sceneIndex].images || []
+      return images.reduce((sum, img) => sum + (img.duration || 0), 0)
+    },
+    [scenes],
+  )
+
+  // Obtener el tiempo de inicio de una escena
+  const getSceneStartTime = useCallback(
+    (sceneIndex: number): number => {
+      let startTime = 0
+      for (let i = 0; i < sceneIndex; i++) {
+        startTime += sceneDurations[i] || 0
+      }
+      return startTime
+    },
+    [sceneDurations],
+  )
+
+  // Obtener el tiempo de fin de una escena
+  const getSceneEndTime = useCallback(
+    (sceneIndex: number): number => {
+      const startTime = getSceneStartTime(sceneIndex)
+      const duration = sceneDurations[sceneIndex] || 0
+      return startTime + duration
+    },
+    [getSceneStartTime, sceneDurations],
+  )
+
+  // Formatear tiempo (mm:ss)
+  const formatTime = useCallback((seconds: number) => {
+    const mins = Math.floor(seconds / 60)
+    const secs = Math.floor(seconds % 60)
+    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`
+  }, [])
+
+  // Actualizar lastActiveSceneIndexRef cuando cambia activeSceneIndex
+  useEffect(() => {
+    lastActiveSceneIndexRef.current = activeSceneIndex
+  }, [activeSceneIndex])
+
+  // Limpiar timeouts al desmontar
+  useEffect(() => {
+    return () => {
+      if (timeUpdateTimeoutRef.current) {
+        clearTimeout(timeUpdateTimeoutRef.current)
+      }
     }
-
-    // Si no, calcular la duración basada en las imágenes
-    const images = scenes[sceneIndex].images || []
-    return images.reduce((sum, img) => sum + (img.duration || 0), 0)
-  }
-
-  const getSceneStartTime = (sceneIndex: number): number => {
-    let startTime = 0
-    for (let i = 0; i < sceneIndex; i++) {
-      startTime += sceneDurations[i] || 0
-    }
-    return startTime
-  }
-
-  const getSceneEndTime = (sceneIndex: number): number => {
-    const startTime = getSceneStartTime(sceneIndex)
-    const duration = sceneDurations[sceneIndex] || 0
-    return startTime + duration
-  }
+  }, [])
 
   return (
     <div className={styles.masterClock}>
       <div className={styles.unifiedControls}>
-        <button onClick={togglePlayPause} className={styles.playButton}>
-          {isPlaying ? "Pause" : "Play"}
-        </button>
-        <span className={styles.timeDisplay}>
-          {formatTime(getSceneStartTime(activeSceneIndex))} - {formatTime(getSceneEndTime(activeSceneIndex))}
-        </span>
-
+        <Button variant="outline" size="sm" onClick={togglePlayPause} className={styles.playButton}>
+          {isPlaying ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
+        </Button>
         <div className={styles.scenesContainer}>
           {scenes.map((scene, index) => (
-            <div
-              key={index}
-              className={`${styles.scene} ${index === activeSceneIndex ? styles.active : ""}`}
+            <Button
+              key={scene.id || index}
+              variant={index === activeSceneIndex ? "default" : "outline"}
+              size="sm"
               onClick={() => handleSceneClick(index)}
+              className={`${styles.scene} ${index === activeSceneIndex ? styles.active : ""}`}
             >
-              {scene.name || `${index + 1}`}
-            </div>
+              {scene.title || `Escena ${index + 1}`}
+            </Button>
           ))}
         </div>
-
-        <span className={styles.totalTime}>Total: {formatTime(projectDuration)}</span>
+        <span className={styles.timeDisplay}>{formatTime(sceneTime)}</span>
       </div>
 
       <div className={styles.progressBar} ref={progressBarRef} onClick={handleProgressBarClick}>
@@ -257,3 +255,5 @@ export default function SceneMasterClock({
     </div>
   )
 }
+
+export default SceneMasterClock

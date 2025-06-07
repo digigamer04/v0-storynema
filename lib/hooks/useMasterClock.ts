@@ -141,33 +141,20 @@ export function useMasterClock({
     [shotsWithTimecodes],
   )
 
-  // Sincronizar el tiempo maestro con el tiempo de audio
-  useEffect(() => {
-    if (syncWithAudio && audioSrc && audioDuration > 0) {
-      // Calcular la proporción entre el tiempo de audio y el tiempo total de tomas
-      const ratio = totalDuration / audioDuration
-      const mappedTime = audioCurrentTime * ratio
-
-      // Actualizar el tiempo maestro
-      setMasterTime(mappedTime)
-
-      // Notificar al componente padre si es necesario
-      if (onTimeUpdate) {
-        onTimeUpdate(mappedTime)
-      }
-    }
-  }, [syncWithAudio, audioSrc, audioDuration, audioCurrentTime, totalDuration, onTimeUpdate])
-
-  // Calcular los tiempos de las tomas cuando cambian las escenas
-  useEffect(() => {
-    calculateAllShotTimecodes()
-  }, [scenes, activeSceneIndex, activeImageIndex, calculateAllShotTimecodes])
-
   // Convertir tiempo de tomas a tiempo de audio
   const convertShotTimeToAudioTime = useCallback(
     (shotTime: number) => {
       if (audioDuration === 0 || totalDuration === 0) return 0
-      return (shotTime / totalDuration) * audioDuration
+
+      // Convertir a puntos de grid para mayor precisión
+      const shotTimeInGridPoints = TimelineGrid.secondsToGridPoints(shotTime)
+      const totalDurationInGridPoints = TimelineGrid.secondsToGridPoints(totalDuration)
+
+      // Calcular la proporción con mayor precisión
+      const ratio = audioDuration / TimelineGrid.gridPointsToSeconds(totalDurationInGridPoints)
+
+      // Convertir de vuelta a segundos con compensación de redondeo
+      return TimelineGrid.gridPointsToSeconds(shotTimeInGridPoints) * ratio
     },
     [audioDuration, totalDuration],
   )
@@ -176,10 +163,51 @@ export function useMasterClock({
   const convertAudioTimeToShotTime = useCallback(
     (audioTime: number) => {
       if (audioDuration === 0 || totalDuration === 0) return 0
-      return (audioTime / audioDuration) * totalDuration
+
+      // Convertir a puntos de grid para mayor precisión
+      const audioTimeInGridPoints = TimelineGrid.secondsToGridPoints(audioTime)
+      const audioDurationInGridPoints = TimelineGrid.secondsToGridPoints(audioDuration)
+
+      // Calcular la proporción con mayor precisión
+      const ratio = totalDuration / TimelineGrid.gridPointsToSeconds(audioDurationInGridPoints)
+
+      // Convertir de vuelta a segundos con compensación de redondeo
+      return TimelineGrid.gridPointsToSeconds(audioTimeInGridPoints) * ratio
     },
     [audioDuration, totalDuration],
   )
+
+  // Añadir esta nueva función después de convertAudioTimeToShotTime:
+  const syncToNearestFrame = useCallback(
+    (time: number, frameRate = currentFrameRate) => {
+      // Convertir tiempo a frames
+      const frames = Math.round(time * frameRate)
+      // Convertir frames de vuelta a tiempo con precisión de frame
+      return frames / frameRate
+    },
+    [currentFrameRate],
+  )
+
+  // Sincronizar el tiempo maestro con el tiempo de audio
+  useEffect(() => {
+    const mappedTime = convertAudioTimeToShotTime(audioCurrentTime)
+
+    // Sincronizar al frame más cercano para evitar desviaciones
+    const frameAlignedTime = syncToNearestFrame(mappedTime)
+
+    // Actualizar el tiempo maestro con compensación de latencia
+    setMasterTime(frameAlignedTime)
+
+    // Notificar al componente padre si es necesario
+    if (onTimeUpdate) {
+      onTimeUpdate(frameAlignedTime)
+    }
+  }, [audioCurrentTime, convertAudioTimeToShotTime, syncToNearestFrame, onTimeUpdate])
+
+  // Calcular los tiempos de las tomas cuando cambian las escenas
+  useEffect(() => {
+    calculateAllShotTimecodes()
+  }, [scenes, activeSceneIndex, activeImageIndex, calculateAllShotTimecodes])
 
   // Calcular el porcentaje de progreso
   const calculateProgress = useCallback(() => {
@@ -243,6 +271,7 @@ export function useMasterClock({
     // Conversiones
     convertShotTimeToAudioTime,
     convertAudioTimeToShotTime,
+    syncToNearestFrame, // Nueva función
   }
 }
 

@@ -1,96 +1,66 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { createServerSupabaseClient } from "@/lib/supabase"
+import { cookies } from "next/headers" // Importar cookies
+import { createServerSupabaseClientWithCookies } from "@/lib/supabase"
 import { getUser } from "@/lib/auth"
 
 export async function POST(request: NextRequest, { params }: { params: { projectId: string } }) {
   try {
     const projectId = params.projectId
+    const cookieStore = cookies()
 
-    if (!projectId) {
-      return NextResponse.json({ error: "Project ID is required" }, { status: 400 })
-    }
-
-    // Get the current user
-    const user = await getUser()
+    // Verificar autenticación y obtener usuario
+    const user = await getUser(cookieStore)
     if (!user) {
+      console.error("Authentication required for backup")
       return NextResponse.json({ error: "Authentication required" }, { status: 401 })
     }
 
-    const supabase = createServerSupabaseClient()
+    const supabase = createServerSupabaseClientWithCookies(cookieStore)
 
-    // 1. Verify project ownership
+    // 1. Obtener el proyecto completo
     const { data: project, error: projectError } = await supabase
       .from("projects")
-      .select("*")
+      .select("*, scenes(*), storyboard_shots(*), camera_settings(*)")
       .eq("id", projectId)
+      .eq("user_id", user.id) // Asegurarse de que el usuario sea el propietario
       .single()
 
     if (projectError) {
-      console.error("Error fetching project:", projectError)
-      return NextResponse.json({ error: "Project not found" }, { status: 404 })
+      console.error("Error fetching project for backup:", projectError.message)
+      return NextResponse.json(
+        { error: `Error al obtener proyecto para la copia de seguridad: ${projectError.message}` },
+        { status: 500 },
+      )
+    }
+    if (!project) {
+      console.error("Project not found or not owned by user for backup")
+      return NextResponse.json({ error: "Proyecto no encontrado o no autorizado" }, { status: 404 })
     }
 
-    if (project.user_id !== user.id) {
-      return NextResponse.json({ error: "You don't have permission to backup this project" }, { status: 403 })
-    }
-
-    // 2. Get all project data
-    const { data: scenes } = await supabase.from("scenes").select("*").eq("project_id", projectId)
-
-    // 3. Get storyboard shots for each scene
-    const shotsPromises =
-      scenes?.map(async (scene) => {
-        const { data: shots } = await supabase.from("storyboard_shots").select("*").eq("scene_id", scene.id)
-
-        // Get camera settings for each shot
-        const settingsPromises =
-          shots?.map(async (shot) => {
-            const { data: settings } = await supabase
-              .from("camera_settings")
-              .select("*")
-              .eq("shot_id", shot.id)
-              .single()
-
-            return { shot, settings }
-          }) || []
-
-        const shotsWithSettings = await Promise.all(settingsPromises)
-
-        return { scene, shots: shotsWithSettings }
-      }) || []
-
-    const scenesWithShots = await Promise.all(shotsPromises)
-
-    // 4. Create a backup record
-    const backupData = {
-      project,
-      scenes: scenesWithShots,
-    }
-
-    // 5. Store the backup in the project_backups table
-    const { data: backup, error: backupError } = await supabase
+    // 2. Insertar en la tabla project_backups
+    const { data: backupRecord, error: backupError } = await supabase
       .from("project_backups")
       .insert({
-        user_id: user.id,
         project_id: projectId,
-        backup_data: backupData,
+        user_id: user.id,
+        backup_data: project, // Guardar el proyecto completo como JSON
         created_at: new Date().toISOString(),
       })
       .select()
       .single()
 
     if (backupError) {
-      console.error("Error creating backup:", backupError)
-      return NextResponse.json({ error: backupError.message }, { status: 500 })
+      console.error("Error creating backup record:", backupError.message)
+      return NextResponse.json(
+        { error: `Error al crear la copia de seguridad: ${backupError.message}` },
+        { status: 500 },
+      )
     }
 
-    return NextResponse.json({
-      success: true,
-      message: "Project backup created successfully",
-      backupId: backup.id,
-    })
+    console.log(`Copia de seguridad del proyecto ${projectId} creada correctamente con ID: ${backupRecord.id}`)
+    return NextResponse.json({ success: true, backupId: backupRecord.id })
   } catch (error: any) {
-    console.error("Error in backup project API:", error)
+    console.error("Error en backup project API:", error)
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 }

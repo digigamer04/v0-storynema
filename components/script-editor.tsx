@@ -52,7 +52,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 
 // Importar el componente MarkdownRenderer
 import MarkdownRenderer from "@/components/markdown-renderer"
-import { updateScene, reorderScenes } from "@/lib/scenes"
+import { createScene, updateScene, deleteScene as deleteSceneDb, reorderScenes } from "@/lib/scenes" // Importar las nuevas funciones de escena
 import { toast } from "@/components/ui/use-toast"
 
 // Importar el administrador de estado
@@ -406,18 +406,19 @@ export function ScriptEditor({
 
   const addNewScene = async () => {
     try {
-      // Crear una escena temporal en memoria
-      const tempScene = {
-        id: `temp-${Date.now()}`, // Asegurar un ID único
-        project_id: projectId,
-        title: `ESCENA ${scenesArray.length + 1} - NUEVA ESCENA`,
-        content: "",
-        order_index: scenesArray.length,
-        is_temporary: true,
-      }
+      const newSceneTitle = `ESCENA ${scenesArray.length + 1} - NUEVA ESCENA`
+      const newSceneContent = ""
 
-      // Actualizar el estado local
-      const updatedScenes = [...scenesArray, tempScene]
+      // Llamar a la función de la API para crear la escena en la base de datos
+      const createdScene = await createScene({
+        project_id: projectId,
+        title: newSceneTitle,
+        content: newSceneContent,
+        order_index: scenesArray.length, // Se calcula en la función de API
+      })
+
+      // Actualizar el estado local con la escena devuelta por la API
+      const updatedScenes = [...scenesArray, createdScene]
       setScenesArray(updatedScenes)
 
       // Guardar en el administrador de estado global
@@ -427,7 +428,7 @@ export function ScriptEditor({
       setActiveSceneIdx(updatedScenes.length - 1)
 
       // Reiniciar el historial para la nueva escena
-      setHistory([""])
+      setHistory([createdScene.content])
       setHistoryIndex(0)
 
       // Inicializar versiones para la nueva escena
@@ -435,48 +436,81 @@ export function ScriptEditor({
         id: Date.now(),
         date: new Date().toLocaleString(),
         description: "Versión inicial",
-        content: "",
+        content: createdScene.content,
       }
       setVersions([initialVersion])
 
-      // Mostrar un mensaje informativo
       toast({
-        title: "Escena temporal creada",
-        description: "Estás trabajando con una escena temporal. Guarda el proyecto para persistir los cambios.",
-        duration: 5000,
+        title: "Escena creada",
+        description: `La escena "${createdScene.title}" ha sido creada correctamente.`,
+        duration: 3000,
       })
     } catch (error) {
       console.error("Error creating new scene:", error)
       toast({
         title: "Error al crear escena",
-        description: "No se pudo crear la escena. Inténtalo de nuevo.",
+        description: `No se pudo crear la escena: ${error instanceof Error ? error.message : String(error)}.`,
         variant: "destructive",
       })
     }
   }
 
-  const deleteScene = (sceneId: string) => {
-    if (scenesArray.length <= 1) return
-    const updatedScenes = scenesArray.filter((s) => s.id !== sceneId)
-    setScenesArray(updatedScenes)
+  const deleteScene = async (sceneId: string) => {
+    if (scenesArray.length <= 1) {
+      toast({
+        title: "No se puede eliminar",
+        description: "Debe haber al menos una escena en el proyecto.",
+        variant: "destructive",
+      })
+      return
+    }
 
-    // Guardar en el administrador de estado global
-    saveScenes(projectId, updatedScenes)
+    try {
+      await deleteSceneDb(sceneId) // Llamar a la función de la base de datos
 
-    if (activeScene.id === sceneId) {
-      setActiveSceneIdx(0)
-      // Reiniciar el historial al eliminar la escena activa
-      setHistory([updatedScenes[0].content])
-      setHistoryIndex(0)
+      const updatedScenes = scenesArray.filter((s) => s.id !== sceneId)
+      setScenesArray(updatedScenes)
 
-      // Cargar versiones para la primera escena
-      const initialVersion = {
-        id: Date.now(),
-        date: new Date().toLocaleString(),
-        description: "Versión inicial",
-        content: updatedScenes[0].content,
+      // Guardar en el administrador de estado global
+      saveScenes(projectId, updatedScenes)
+
+      // Reajustar order_index de las escenas restantes
+      const reorderedSceneIds = updatedScenes.map((s, index) => {
+        if (s.order_index !== index) {
+          updateScene(s.id, { order_index: index }).catch(console.error)
+        }
+        return s.id
+      })
+      await reorderScenes(projectId, reorderedSceneIds)
+
+      if (activeScene.id === sceneId) {
+        setActiveSceneIdx(0)
+        // Reiniciar el historial al eliminar la escena activa
+        setHistory([updatedScenes[0].content])
+        setHistoryIndex(0)
+
+        // Cargar versiones para la primera escena
+        const initialVersion = {
+          id: Date.now(),
+          date: new Date().toLocaleString(),
+          description: "Versión inicial",
+          content: updatedScenes[0].content,
+        }
+        setVersions([initialVersion])
       }
-      setVersions([initialVersion])
+
+      toast({
+        title: "Escena eliminada",
+        description: "La escena ha sido eliminada correctamente.",
+        duration: 3000,
+      })
+    } catch (error) {
+      console.error("Error deleting scene:", error)
+      toast({
+        title: "Error al eliminar escena",
+        description: `No se pudo eliminar la escena: ${error instanceof Error ? error.message : String(error)}.`,
+        variant: "destructive",
+      })
     }
   }
 

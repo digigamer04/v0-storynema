@@ -1,6 +1,56 @@
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs"
 import type { Database } from "@/types/supabase"
 
+// Function to create a new scene
+export async function createScene(sceneData: {
+  project_id: string
+  title: string
+  content?: string
+  order_index?: number
+}) {
+  try {
+    const supabase = createClientComponentClient<Database>()
+
+    // Obtener el orden máximo actual para el project_id dado
+    const { data: maxOrderScene, error: maxOrderError } = await supabase
+      .from("scenes")
+      .select("order_index")
+      .eq("project_id", sceneData.project_id)
+      .order("order_index", { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    if (maxOrderError) {
+      console.error("Error fetching max order_index:", maxOrderError.message)
+      throw new Error(`Error al obtener el índice de orden máximo: ${maxOrderError.message}`)
+    }
+
+    // Calcular el nuevo orden
+    const newOrder = maxOrderScene ? maxOrderScene.order_index + 1 : 0
+
+    const { data: newScene, error } = await supabase
+      .from("scenes")
+      .insert({
+        project_id: sceneData.project_id,
+        title: sceneData.title,
+        content: sceneData.content || "",
+        order_index: newOrder,
+      })
+      .select()
+      .single()
+
+    if (error) {
+      console.error("Error creating scene:", error)
+      throw new Error(`Error al crear la escena: ${error.message}`)
+    }
+
+    return newScene
+  } catch (error: any) {
+    console.error("Error in createScene:", error)
+    throw new Error(`Error al crear la escena: ${error.message}`)
+  }
+}
+
 // Function to update a scene
 export async function updateScene(sceneId: string, updates: any) {
   try {
@@ -17,6 +67,25 @@ export async function updateScene(sceneId: string, updates: any) {
   } catch (error: any) {
     console.error("Error in updateScene:", error)
     throw new Error(`Error al actualizar la escena: ${error.message}`)
+  }
+}
+
+// Function to delete a scene
+export async function deleteScene(sceneId: string) {
+  try {
+    const supabase = createClientComponentClient<Database>()
+
+    const { error } = await supabase.from("scenes").delete().eq("id", sceneId)
+
+    if (error) {
+      console.error("Error deleting scene:", error)
+      throw new Error(`Error al eliminar la escena: ${error.message}`)
+    }
+
+    return true
+  } catch (error: any) {
+    console.error("Error in deleteScene:", error)
+    throw new Error(`Error al eliminar la escena: ${error.message}`)
   }
 }
 

@@ -2,6 +2,7 @@
 
 import type React from "react"
 import Image from "next/image"
+import { TimelineGrid } from "@/app/editor/timeline/TimelineGrid"
 
 interface Shot {
   id: string
@@ -52,8 +53,18 @@ export function ShotsTimelineTrack({
   const calculatePlayheadPosition = () => {
     if (totalDuration === 0 || audioDuration === 0) return 0
 
-    // Mapear el tiempo de audio al tiempo de tomas
-    const mappedShotTime = (audioCurrentTime / audioDuration) * totalDuration
+    // Mapear el tiempo de audio al tiempo de tomas con precisión de grid
+    const audioTimeInGridPoints = TimelineGrid.secondsToGridPoints(audioCurrentTime)
+    const audioDurationInGridPoints = TimelineGrid.secondsToGridPoints(audioDuration)
+    const totalDurationInGridPoints = TimelineGrid.secondsToGridPoints(totalDuration)
+
+    // Calcular la proporción con precisión de grid
+    const ratio = totalDurationInGridPoints / audioDurationInGridPoints
+
+    // Convertir a tiempo de toma con precisión de grid
+    const mappedShotTimeInGridPoints = audioTimeInGridPoints * ratio
+    const mappedShotTime = TimelineGrid.gridPointsToSeconds(mappedShotTimeInGridPoints)
+
     return (mappedShotTime / totalDuration) * 100
   }
 
@@ -77,10 +88,21 @@ export function ShotsTimelineTrack({
     // Llamar a onShotSelect con los parámetros correctos
     onShotSelect(activeSceneIndex, index)
 
-    // % exacto del audio donde empieza esta toma
-    // Usar el tiempo de inicio absoluto de la toma
-    const pct = (shot.startTime / audioDuration) * 100
-    onSeek(pct) // mueve audio a pct% de audioDuration
+    // Calcular el tiempo exacto de inicio de la toma con precisión de grid
+    const startTimeInGridPoints = TimelineGrid.secondsToGridPoints(shot.startTime)
+
+    // Convertir el tiempo de toma a tiempo de audio con precisión de grid
+    const audioTimeInGridPoints = TimelineGrid.syncTimeBasedOnGrid(
+      TimelineGrid.gridPointsToSeconds(startTimeInGridPoints),
+      totalDuration,
+      audioDuration,
+    )
+
+    // Calcular el porcentaje exacto
+    const pct = (audioTimeInGridPoints / audioDuration) * 100
+
+    // Mover audio a la posición exacta
+    onSeek(pct)
   }
 
   // Format time in mm:ss.ms

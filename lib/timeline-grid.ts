@@ -357,3 +357,38 @@ export function calculateShotEndTime(shots: { duration: number }[], shotIndex: n
 
   return startTime + gridPointsToSeconds(durationInGridPoints)
 }
+
+/**
+ * Sincroniza dos tiempos diferentes con compensación de precisión de cuadro
+ * Versión mejorada que utiliza puntos de grid para mayor precisión
+ * @param sourceTime Tiempo fuente en segundos
+ * @param sourceDuration Duración total de la fuente en segundos
+ * @param targetDuration Duración total del objetivo en segundos
+ * @param frameRate Velocidad de frames para sincronización precisa
+ * @returns Tiempo sincronizado para el objetivo en segundos
+ */
+export function syncTimeWithFramePrecision(
+  sourceTime: number,
+  sourceDuration: number,
+  targetDuration: number,
+  frameRate = FRAME_RATES.FILM,
+): number {
+  if (sourceDuration === 0 || targetDuration === 0) return 0
+
+  // Convertir todo a puntos de grid para mayor precisión
+  const sourcePoints = secondsToGridPoints(sourceTime)
+  const sourceTotalPoints = secondsToGridPoints(sourceDuration)
+
+  // Calcular el porcentaje con precisión de grid
+  const percentage = (sourcePoints / sourceTotalPoints) * 100
+
+  const targetTotalPoints = secondsToGridPoints(targetDuration)
+  const targetPoints = percentageToGridPoint(percentage, targetTotalPoints)
+
+  // Convertir a tiempo en segundos
+  const targetTime = gridPointsToSeconds(targetPoints)
+
+  // Ajustar al frame más cercano para evitar desviaciones
+  const frames = Math.round(targetTime * frameRate)
+  return frames / frameRate
+}

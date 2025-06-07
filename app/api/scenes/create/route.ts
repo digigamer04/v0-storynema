@@ -1,13 +1,15 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { createServerSupabaseClient } from "@/lib/supabase"
+import { createServerSupabaseClientWithCookies } from "@/lib/supabase"
 import { getUser } from "@/lib/auth"
+import { cookies } from "next/headers" // Importar cookies
 
 export async function POST(request: NextRequest) {
   try {
     console.log("Creando nueva escena...")
 
     // Verificar autenticación
-    const user = await getUser()
+    const cookieStore = cookies()
+    const user = await getUser(cookieStore) // Pasar cookieStore a getUser
     if (!user) {
       console.error("Authentication required")
       return NextResponse.json({ error: "Authentication required" }, { status: 401 })
@@ -28,11 +30,13 @@ export async function POST(request: NextRequest) {
     }
 
     // Verificar que el proyecto existe y pertenece al usuario
-    const supabase = createServerSupabaseClient()
+    // Usar createServerSupabaseClientWithCookies para respetar RLS
+    const supabase = createServerSupabaseClientWithCookies(cookieStore)
     const { data: project, error: projectError } = await supabase
       .from("projects")
       .select("*")
       .eq("id", sceneData.project_id)
+      .eq("user_id", user.id) // Asegurar que el proyecto pertenezca al usuario
       .single()
 
     if (projectError) {
@@ -41,13 +45,8 @@ export async function POST(request: NextRequest) {
     }
 
     if (!project) {
-      console.error("Project not found")
-      return NextResponse.json({ error: "Proyecto no encontrado" }, { status: 404 })
-    }
-
-    if (project.user_id !== user.id && !project.is_sample) {
-      console.error("User does not own this project")
-      return NextResponse.json({ error: "No tienes permiso para modificar este proyecto" }, { status: 403 })
+      console.error("Project not found or not owned by user")
+      return NextResponse.json({ error: "Proyecto no encontrado o no tienes permiso" }, { status: 404 })
     }
 
     // Establecer valores por defecto

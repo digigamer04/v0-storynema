@@ -4,6 +4,7 @@ import type React from "react"
 import { useEffect, useRef, useState } from "react"
 import { Loader2 } from "lucide-react"
 import { generateSimulatedWaveform } from "@/lib/waveform-utils"
+import { TimelineGrid } from "@/components/timeline/timeline-grid"
 
 interface AudioTimelineTrackProps {
   audioCurrentTime: number
@@ -124,18 +125,24 @@ export function AudioTimelineTrack({
 
     // Calcular la duración total de todas las tomas usando la grid
     const totalShotsDurationValue = shots.reduce((total, shot) => {
-      return total + shot.duration
+      // Convertir a puntos de grid para mayor precisión
+      const durationInGridPoints = TimelineGrid.secondsToGridPoints(shot.duration || 0)
+      return total + TimelineGrid.gridPointsToSeconds(durationInGridPoints)
     }, 0)
 
-    // Crear marcadores para cada toma
+    // Crear marcadores para cada toma con precisión de grid
     const markers = []
     let accumulatedTime = 0
 
     for (let i = 0; i < shots.length; i++) {
       const shot = shots[i]
 
+      // Convertir a puntos de grid para mayor precisión
+      const shotDurationInGridPoints = TimelineGrid.secondsToGridPoints(shot.duration || 0)
+
       // Calcular la posición proporcional en el audio con precisión de grid
-      const audioStartTime = accumulatedTime
+      const audioStartTime = TimelineGrid.syncTimeBasedOnGrid(accumulatedTime, totalShotsDurationValue, audioDuration)
+
       const audioStartPercent = (audioStartTime / audioDuration) * 100
 
       markers.push({
@@ -145,7 +152,7 @@ export function AudioTimelineTrack({
       })
 
       // Acumular tiempo con precisión de grid
-      accumulatedTime += shot.duration
+      accumulatedTime += TimelineGrid.gridPointsToSeconds(shotDurationInGridPoints)
     }
 
     return markers
@@ -194,8 +201,7 @@ export function AudioTimelineTrack({
         {isMagnetismEnabled &&
           magneticPoints.map((point, index) => {
             // Convertir puntos magnéticos de la línea de tiempo a puntos en el audio
-            // const audioPoint = TimelineGrid.syncTimeBasedOnGrid(point, totalShotsDuration, audioDuration)
-            const audioPoint = point
+            const audioPoint = TimelineGrid.syncTimeBasedOnGrid(point, totalShotsDuration, audioDuration)
 
             if (audioPoint > audioDuration) return null
 
