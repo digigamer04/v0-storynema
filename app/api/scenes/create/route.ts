@@ -1,7 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { createServerSupabaseClientWithCookies } from "@/lib/supabase"
 import { getUser } from "@/lib/auth"
-import { cookies } from "next/headers" // Importar cookies
+import { cookies } from "next/headers"
 
 export async function POST(request: NextRequest) {
   try {
@@ -9,7 +9,7 @@ export async function POST(request: NextRequest) {
 
     // Verificar autenticación
     const cookieStore = cookies()
-    const user = await getUser(cookieStore) // Pasar cookieStore a getUser
+    const user = await getUser(cookieStore)
     if (!user) {
       console.error("Authentication required")
       return NextResponse.json({ error: "Authentication required" }, { status: 401 })
@@ -29,9 +29,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "El título de la escena es obligatorio" }, { status: 400 })
     }
 
-    // Verificar que el proyecto existe y pertenece al usuario
     // Usar createServerSupabaseClientWithCookies para respetar RLS
     const supabase = createServerSupabaseClientWithCookies(cookieStore)
+
+    // Verificar que el proyecto existe y pertenece al usuario
     const { data: project, error: projectError } = await supabase
       .from("projects")
       .select("*")
@@ -49,18 +50,37 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Proyecto no encontrado o no tienes permiso" }, { status: 404 })
     }
 
-    // Establecer valores por defecto
-    sceneData.created_at = new Date().toISOString()
-    sceneData.updated_at = new Date().toISOString()
+    // Obtener el orden máximo actual para el project_id dado
+    const { data: maxOrderScene, error: maxOrderError } = await supabase
+      .from("scenes")
+      .select("order_index")
+      .eq("project_id", sceneData.project_id)
+      .order("order_index", { ascending: false })
+      .limit(1)
+      .maybeSingle()
 
-    console.log("Creating scene with data:", {
+    if (maxOrderError) {
+      console.error("Error fetching max order_index:", maxOrderError)
+      return NextResponse.json({ error: "Error al obtener el índice de orden máximo" }, { status: 500 })
+    }
+
+    // Calcular el nuevo orden
+    const newOrder = maxOrderScene ? maxOrderScene.order_index + 1 : 0
+
+    // Preparar datos de la escena con valores por defecto
+    const sceneToInsert = {
       project_id: sceneData.project_id,
       title: sceneData.title,
-      order_index: sceneData.order_index || 0,
-    })
+      content: sceneData.content || "",
+      order_index: newOrder,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }
+
+    console.log("Creating scene with data:", sceneToInsert)
 
     // Crear escena
-    const { data, error } = await supabase.from("scenes").insert(sceneData).select().single()
+    const { data, error } = await supabase.from("scenes").insert(sceneToInsert).select().single()
 
     if (error) {
       console.error("Error creating scene:", error)

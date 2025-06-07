@@ -13,6 +13,7 @@ import GeminiIntegration from "@/components/gemini-integration"
 import { toast } from "@/components/ui/use-toast"
 import { createClientSupabaseClient } from "@/lib/supabase"
 import { cleanupProjectData } from "@/lib/project-isolation"
+import { projectCache, getCachedProject, isCacheLoading } from "@/lib/project-cache"
 
 export default function ProjectPage({ params }: { params: { id: string } }) {
   const router = useRouter()
@@ -61,72 +62,35 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     checkAuth()
   }, [router])
 
-  // Usar useCallback para optimizar las funciones de actualización
-  const handleScenesUpdate = useCallback(
-    (updatedScenes) => {
-      setScenes(updatedScenes)
-      try {
-        // Usar un prefijo único que incluya el ID del proyecto
-        const storageKey = `storynema_scenes_${params.id}`
-        localStorage.setItem(storageKey, JSON.stringify(updatedScenes))
-        localStorage.setItem(`storynema_last_update_source_${params.id}`, "script_editor")
-        localStorage.setItem(`storynema_last_update_time_${params.id}`, Date.now().toString())
-      } catch (error) {
-        console.error("Error saving scenes to localStorage:", error)
-      }
-    },
-    [params.id],
-  )
-
-  const handleStoryboardScenesUpdate = useCallback(
-    (updatedScenes) => {
-      setScenes(updatedScenes)
-      try {
-        // Usar un prefijo único que incluya el ID del proyecto
-        const storageKey = `storynema_scenes_${params.id}`
-        localStorage.setItem(storageKey, JSON.stringify(updatedScenes))
-        localStorage.setItem(`storynema_last_update_source_${params.id}`, "storyboard")
-        localStorage.setItem(`storynema_last_update_time_${params.id}`, Date.now().toString())
-      } catch (error) {
-        console.error("Error saving scenes from storyboard to localStorage:", error)
-      }
-    },
-    [params.id],
-  )
-
-  const handleSetActiveSceneIndex = useCallback((index: number) => {
-    setActiveSceneIndex(index)
-  }, [])
-
-  const handleStoryboardDataUpdate = useCallback(
-    (data) => {
-      setStoryboardData(data)
-      try {
-        // Usar un prefijo único que incluya el ID del proyecto
-        const storageKey = `storynema_storyboard_data_${params.id}`
-        localStorage.setItem(storageKey, JSON.stringify(data))
-      } catch (error) {
-        console.error("Error saving storyboard data to localStorage:", error)
-      }
-    },
-    [params.id],
-  )
-
-  // Modificar el useEffect que carga los datos del proyecto para cargar también desde localStorage si es necesario
+  // Cargar proyecto en cache al inicializar
   useEffect(() => {
     if (!userId) return
 
-    const fetchProjectData = async () => {
+    const loadProjectData = async () => {
       try {
         setIsLoading(true)
         setError(null)
 
-        console.log("Fetching project data for ID:", params.id)
+        console.log("Cargando proyecto:", params.id)
 
-        // Limpiar datos de localStorage de otros proyectos
-        cleanupProjectData(params.id)
+        // Establecer como proyecto activo
+        projectCache.setActiveProject(params.id)
 
+        // Verificar si ya está en cache
+        const cachedProject = getCachedProject(params.id)
+        if (cachedProject && !cachedProject.isLoading) {
+          console.log("Proyecto encontrado en cache")
+          setProjectTitle(cachedProject.project.title)
+          setScenes(cachedProject.scenes)
+          setStoryboardData(cachedProject.storyboard)
+          setIsLoading(false)
+          return
+        }
+
+        // Si no está en cache o está cargando, cargar desde la base de datos
         const supabase = createClientSupabaseClient()
+
+        // Verificar permisos del proyecto primero
         const { data: projectData, error: projectError } = await supabase
           .from("projects")
           .select("*")
@@ -147,63 +111,19 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
           return
         }
 
-        console.log("Project data loaded:", projectData.title)
-        setProjectTitle(projectData.title)
+        // Cargar proyecto completo en cache
+        const loadedProject = await projectCache.loadProject(params.id, supabase)
 
-        let loadedScenes = null
-        try {
-          const savedScenes = localStorage.getItem(`storynema_scenes_${params.id}`)
-          if (savedScenes) {
-            loadedScenes = JSON.parse(savedScenes)
-            console.log("Loaded scenes from localStorage:", loadedScenes.length)
-          }
-        } catch (error) {
-          console.error("Error loading scenes from localStorage:", error)
-        }
+        // Actualizar estado local con datos del cache
+        setProjectTitle(loadedProject.project.title)
+        setScenes(loadedProject.scenes)
+        setStoryboardData(loadedProject.storyboard)
 
-        if (!loadedScenes) {
-          console.log("Fetching scenes for project:", params.id)
-          const { data: scenesData, error: scenesError } = await supabase
-            .from("scenes")
-            .select("*")
-            .eq("project_id", params.id)
-            .order("order_index", { ascending: false })
-
-          if (scenesError) {
-            console.error("Error fetching scenes:", scenesError)
-            setError(`Error al cargar las escenas: ${scenesError.message}`)
-            setIsLoading(false)
-            return
-          }
-
-          loadedScenes = scenesData
-        }
-
-        if (loadedScenes && loadedScenes.length > 0) {
-          console.log("Using loaded scenes:", loadedScenes.length)
-          setScenes(loadedScenes)
-        } else {
-          console.log("No scenes found, using temporary scene")
-
-          const tempScene = {
-            id: `temp-${Date.now()}`,
-            title: "ESCENA 1 - NUEVA ESCENA",
-            content: "",
-            project_id: params.id,
-            order_index: 0,
-            is_temporary: true,
-          }
-
-          setScenes([tempScene])
-
-          toast({
-            title: "Escena temporal creada",
-            description: "Estás trabajando con una escena temporal. Guarda el proyecto para persistir los cambios.",
-            duration: 5000,
-          })
-        }
+        // Limpiar datos de localStorage de otros proyectos
+        cleanupProjectData(params.id)
 
         setIsLoading(false)
+        console.log("Proyecto cargado exitosamente en cache")
       } catch (error: any) {
         console.error("Error loading project data:", error)
         setError(`Error al cargar los datos del proyecto: ${error.message}`)
@@ -217,8 +137,66 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
       }
     }
 
-    fetchProjectData()
+    loadProjectData()
   }, [params.id, userId, router])
+
+  // Usar useCallback para optimizar las funciones de actualización
+  const handleScenesUpdate = useCallback(
+    (updatedScenes) => {
+      setScenes(updatedScenes)
+
+      // Actualizar cache
+      projectCache.updateScenes(params.id, updatedScenes)
+
+      // Sincronizar con localStorage
+      projectCache.syncToLocalStorage(params.id)
+
+      try {
+        localStorage.setItem(`storynema_last_update_source_${params.id}`, "script_editor")
+        localStorage.setItem(`storynema_last_update_time_${params.id}`, Date.now().toString())
+      } catch (error) {
+        console.error("Error saving scenes to localStorage:", error)
+      }
+    },
+    [params.id],
+  )
+
+  const handleStoryboardScenesUpdate = useCallback(
+    (updatedScenes) => {
+      setScenes(updatedScenes)
+
+      // Actualizar cache
+      projectCache.updateScenes(params.id, updatedScenes)
+
+      // Sincronizar con localStorage
+      projectCache.syncToLocalStorage(params.id)
+
+      try {
+        localStorage.setItem(`storynema_last_update_source_${params.id}`, "storyboard")
+        localStorage.setItem(`storynema_last_update_time_${params.id}`, Date.now().toString())
+      } catch (error) {
+        console.error("Error saving scenes from storyboard to localStorage:", error)
+      }
+    },
+    [params.id],
+  )
+
+  const handleSetActiveSceneIndex = useCallback((index: number) => {
+    setActiveSceneIndex(index)
+  }, [])
+
+  const handleStoryboardDataUpdate = useCallback(
+    (data) => {
+      setStoryboardData(data)
+
+      // Actualizar cache
+      projectCache.updateStoryboard(params.id, data)
+
+      // Sincronizar con localStorage
+      projectCache.syncToLocalStorage(params.id)
+    },
+    [params.id],
+  )
 
   // Función para generar sugerencias de IA basadas en el guion actual
   const generateAiSuggestions = useCallback(() => {
@@ -268,11 +246,7 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
 
   // Función para aplicar una sugerencia de IA
   const applySuggestion = useCallback((suggestion: string) => {
-    const generatedText = `
-
-// Sugerencia aplicada: ${suggestion}
-
-`
+    const generatedText = `\n\n// Sugerencia aplicada: ${suggestion}\n\n`
     setGeneratedContent(generatedText)
   }, [])
 
@@ -320,8 +294,10 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
 
           console.log("New scene created with ID:", newScene.id)
 
-          // Update the local state with the new scene ID
-          setScenes(scenes.map((s, idx) => (idx === i ? newScene : s)))
+          // Update the local state and cache with the new scene ID
+          const updatedScenes = scenes.map((s, idx) => (idx === i ? newScene : s))
+          setScenes(updatedScenes)
+          projectCache.updateScenes(params.id, updatedScenes)
         } else {
           // Validate that scene.id is a valid UUID for non-temporary scenes
           if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(scene.id)) {
@@ -360,9 +336,8 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
         }
       }
 
-      // Actualizar el localStorage con los datos más recientes
-      localStorage.setItem(`storynema_scenes_${params.id}`, JSON.stringify(scenes))
-      localStorage.setItem(`storynema_last_update_time_${params.id}`, Date.now().toString())
+      // Sincronizar cache con localStorage
+      projectCache.syncToLocalStorage(params.id)
 
       toast({
         title: "Proyecto guardado",
@@ -378,35 +353,21 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     }
   }
 
-  // Agregar esta función después de la declaración de saveProject
-  const cleanupProjectDataLocal = useCallback(() => {
-    // Limpiar solo los datos relacionados con este proyecto específico
-    try {
-      localStorage.removeItem(`storynema_scenes_${params.id}`)
-      localStorage.removeItem(`storynema_storyboard_data_${params.id}`)
-      localStorage.removeItem(`storynema_last_update_source_${params.id}`)
-      localStorage.removeItem(`storynema_last_update_time_${params.id}`)
-    } catch (error) {
-      console.error("Error cleaning up project data:", error)
-    }
-  }, [params.id])
-
-  // Agregar este useEffect para limpiar los datos al desmontar el componente
+  // Limpiar cache al desmontar el componente
   useEffect(() => {
     return () => {
-      // Solo limpiar si hemos guardado los datos en la base de datos
-      const lastUpdateTime = localStorage.getItem(`storynema_last_update_time_${params.id}`)
-      if (lastUpdateTime) {
-        const timeSinceLastUpdate = Date.now() - Number.parseInt(lastUpdateTime)
-        // Si han pasado más de 5 minutos desde la última actualización, limpiar los datos
+      // Solo limpiar cache si han pasado más de 5 minutos sin actividad
+      const cachedProject = getCachedProject(params.id)
+      if (cachedProject) {
+        const timeSinceLastUpdate = Date.now() - cachedProject.lastUpdated
         if (timeSinceLastUpdate > 5 * 60 * 1000) {
-          cleanupProjectDataLocal()
+          projectCache.clearProject(params.id)
         }
       }
     }
-  }, [cleanupProjectDataLocal, params.id])
+  }, [params.id])
 
-  if (isLoading) {
+  if (isLoading || isCacheLoading(params.id)) {
     return (
       <div className="container mx-auto px-4 py-6">
         <div className="flex flex-col gap-6">

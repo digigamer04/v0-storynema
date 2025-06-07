@@ -90,7 +90,6 @@ export async function deleteScene(sceneId: string) {
 }
 
 // Modificar la función reorderScenes para asegurar que los cambios se apliquen profundamente
-
 export async function reorderScenes(projectId: string, sceneIds: string[]) {
   try {
     const supabase = createClientComponentClient<Database>()

@@ -16,8 +16,6 @@ import SidePanel from "./SidePanel"
 import SceneNavigation from "./SceneNavigation"
 import SceneMasterClock from "@/components/timeline/SceneMasterClock"
 import MediaManager from "@/components/media-manager"
-// Cambiar el import de FullscreenViewer a AmplifiedViewer
-import AmplifiedViewer from "./AmplifiedViewer"
 
 import type {
   StoryboardEditorProps,
@@ -86,11 +84,6 @@ export function StoryboardEditor({ projectId, userId, scenes: scriptScenes, onSc
   const [favoriteLenses, setFavoriteLenses] = useState<FavoriteLens[]>([])
   const [showMediaManager, setShowMediaManager] = useState(false)
   const [isRecoveringAudio, setIsRecoveringAudio] = useState(false)
-  const [isSceneChanging, setIsSceneChanging] = useState(false)
-  // Nuevo estado para controlar si la escena fue seleccionada manualmente
-  const [manualSceneSelection, setManualSceneSelection] = useState(false)
-  // Cambiar el nombre del estado para reflejar la nueva funcionalidad
-  const [isAmplifiedMode, setIsAmplifiedMode] = useState(false)
 
   // === REFS ===
   const scenesInitializedRef = useRef(false)
@@ -99,8 +92,6 @@ export function StoryboardEditor({ projectId, userId, scenes: scriptScenes, onSc
   const lastUpdateTimeRef = useRef<number>(Date.now())
   const audioPlayPromiseRef = useRef<Promise<void> | undefined>(undefined)
   const maxRetryAttemptsRef = useRef(3)
-  const sceneChangeTimeoutRef = useRef<NodeJS.Timeout | null>(null)
-  const lastManualSceneIndexRef = useRef<number>(0)
 
   // === DERIVED STATE ===
   const activeScene = internalScenes[activeSceneIndex]
@@ -234,9 +225,6 @@ export function StoryboardEditor({ projectId, userId, scenes: scriptScenes, onSc
   // === PLAYBACK LOGIC ===
   useEffect(() => {
     if (isPlaying) {
-      // Al iniciar la reproducción, desactivamos el modo de selección manual
-      // para permitir que la reproducción avance normalmente
-      setManualSceneSelection(false)
       startPlaybackTimer()
     } else {
       stopPlaybackTimer()
@@ -588,8 +576,6 @@ export function StoryboardEditor({ projectId, userId, scenes: scriptScenes, onSc
       retryAudioOperation().then((success) => {
         if (success) {
           setIsPlaying(true)
-          // Al iniciar la reproducción, desactivamos el modo de selección manual
-          setManualSceneSelection(false)
         }
       })
       return
@@ -597,10 +583,6 @@ export function StoryboardEditor({ projectId, userId, scenes: scriptScenes, onSc
 
     if (!audioRef.current) {
       setIsPlaying((prev) => !prev)
-      // Al iniciar la reproducción, desactivamos el modo de selección manual
-      if (!isPlaying) {
-        setManualSceneSelection(false)
-      }
       return
     }
 
@@ -611,8 +593,6 @@ export function StoryboardEditor({ projectId, userId, scenes: scriptScenes, onSc
     } else {
       // Si está pausado, intentar reproducir
       setIsPlaying(true) // Optimistic update
-      // Al iniciar la reproducción, desactivamos el modo de selección manual
-      setManualSceneSelection(false)
       // La reproducción real se maneja en el useEffect
     }
   }, [isPlaying, audioError, retryAudioOperation])
@@ -632,208 +612,36 @@ export function StoryboardEditor({ projectId, userId, scenes: scriptScenes, onSc
 
   const nextScene = useCallback(() => {
     if (activeSceneIndex < internalScenes.length - 1) {
-      // Activar modo de selección manual al cambiar de escena manualmente
-      setManualSceneSelection(true)
       goToShot(activeSceneIndex + 1, 0)
     }
   }, [activeSceneIndex, internalScenes.length])
 
   const prevScene = useCallback(() => {
     if (activeSceneIndex > 0) {
-      // Activar modo de selección manual al cambiar de escena manualmente
-      setManualSceneSelection(true)
       const prevScene = internalScenes[activeSceneIndex - 1]
       const lastImageIndex = prevScene.images.length - 1
       goToShot(activeSceneIndex - 1, Math.max(0, lastImageIndex))
     }
   }, [activeSceneIndex, internalScenes])
 
-  // Función para manejar el cambio de escena de forma segura
-  const handleSceneChange = useCallback(
-    (newIndex: number) => {
-      // Evitar cambios rápidos consecutivos
-      if (isSceneChanging) return
-
-      console.log(`Cambio manual a escena: ${newIndex}`)
-
-      // Activar el modo de selección manual para bloquear la sincronización automática
-      setManualSceneSelection(true)
-
-      // Guardar el índice de la escena seleccionada manualmente
-      lastManualSceneIndexRef.current = newIndex
-
-      setIsSceneChanging(true)
-      setActiveSceneIndex(newIndex)
-
-      // También actualizar el tiempo actual para que coincida con el inicio de la escena seleccionada
-      let accumulatedTime = 0
-      for (let i = 0; i < newIndex; i++) {
-        if (internalScenes[i] && internalScenes[i].images) {
-          internalScenes[i].images.forEach((img) => {
-            accumulatedTime += img.duration || 0
-          })
-        }
-      }
-      setCurrentTime(accumulatedTime)
-
-      // Si hay audio, sincronizarlo con la nueva posición
-      if (audioRef.current && audioRef.current.readyState >= 2) {
-        audioRef.current.currentTime = accumulatedTime
-        console.log(`Audio sincronizado con nueva escena: ${accumulatedTime.toFixed(2)}s`)
-      }
-
-      // Limpiar cualquier timeout anterior
-      if (sceneChangeTimeoutRef.current) {
-        clearTimeout(sceneChangeTimeoutRef.current)
-      }
-
-      // Establecer un tiempo de espera antes de permitir otro cambio de escena
-      sceneChangeTimeoutRef.current = setTimeout(() => {
-        console.log("Fin del bloqueo de cambios rápidos")
-        setIsSceneChanging(false)
-      }, 500) // Tiempo corto solo para evitar cambios rápidos
-    },
-    [isSceneChanging, internalScenes, audioRef, setCurrentTime],
-  )
-
-  // Vamos a corregir el problema de reinicio del audio durante el cambio de escenas
-  // Modificar la función goToShot para manejar mejor la sincronización del audio
   const goToShot = useCallback(
     (sceneIndex: number, imageIndex: number, syncAudio = true) => {
-      // Verificar si la escena y la imagen existen antes de proceder
-      if (!internalScenes[sceneIndex] || !internalScenes[sceneIndex].images[imageIndex]) {
-        console.warn("Intento de ir a una toma que no existe:", sceneIndex, imageIndex)
-        return
-      }
-
-      // Marcar que estamos en un cambio manual
-      setIsSceneChanging(true)
-
-      // Usar handleSceneChange para cambiar la escena de forma segura
-      if (sceneIndex !== activeSceneIndex) {
-        handleSceneChange(sceneIndex)
-      } else {
-        setActiveSceneIndex(sceneIndex)
-      }
-
+      setActiveSceneIndex(sceneIndex)
       setActiveImageIndex(imageIndex)
 
       const startTime = calculateCurrentShotStartTime(internalScenes, sceneIndex, imageIndex)
+
       setCurrentTime(startTime)
 
-      // Solo sincronizar el audio si se solicita explícitamente y está habilitado
       if (syncAudio && audioRef.current && autoSyncAudioWithShots) {
-        try {
-          // Guardar la posición actual del audio para detectar si es una toma nueva fuera del proyecto
-          const currentAudioPosition = audioRef.current.currentTime
-
-          // Verificar si el audio está en un estado válido antes de cambiar su tiempo
-          if (audioRef.current.readyState >= 2) {
-            // HAVE_CURRENT_DATA o superior
-            // Establecer el nuevo tiempo de audio
-            audioRef.current.currentTime = startTime
-
-            // Registrar el cambio para depuración
-            console.log(`Audio sincronizado: ${currentAudioPosition.toFixed(2)}s → ${startTime.toFixed(2)}s`)
-          } else {
-            console.warn("Audio no listo para sincronizar. Estado:", audioRef.current.readyState)
-            // Programar un intento de sincronización cuando el audio esté listo
-            const checkAndSync = () => {
-              if (audioRef.current && audioRef.current.readyState >= 2) {
-                audioRef.current.currentTime = startTime
-                console.log(`Audio sincronizado (retrasado): ${startTime.toFixed(2)}s`)
-                audioRef.current.removeEventListener("canplay", checkAndSync)
-              }
-            }
-            audioRef.current.addEventListener("canplay", checkAndSync)
-          }
-        } catch (error) {
-          console.error("Error al sincronizar audio:", error)
-        }
+        audioRef.current.currentTime = startTime
       }
-
-      // Limpiar cualquier timeout anterior
-      if (sceneChangeTimeoutRef.current) {
-        clearTimeout(sceneChangeTimeoutRef.current)
-      }
-
-      // Establecer un tiempo de espera antes de permitir otro cambio de escena
-      sceneChangeTimeoutRef.current = setTimeout(() => {
-        console.log("Fin del bloqueo después de goToShot")
-        setIsSceneChanging(false)
-      }, 500) // Tiempo corto solo para evitar cambios rápidos
     },
-    [internalScenes, autoSyncAudioWithShots, activeSceneIndex, handleSceneChange, setCurrentTime],
+    [internalScenes, autoSyncAudioWithShots],
   )
-
-  // Limpiar el timeout cuando el componente se desmonte
-  useEffect(() => {
-    return () => {
-      if (sceneChangeTimeoutRef.current) {
-        clearTimeout(sceneChangeTimeoutRef.current)
-      }
-    }
-  }, [])
-
-  // Añadir esta función después de la declaración de goToShot
-  const syncTimeReferences = useCallback(() => {
-    // Si estamos en modo de selección manual, NO sincronizar automáticamente
-    if (manualSceneSelection) {
-      console.log("Sincronización automática desactivada: modo de selección manual activo")
-      return
-    }
-
-    if (!audioRef.current || !autoSyncAudioWithShots) return
-
-    // Si hubo un cambio manual reciente, no sincronizar automáticamente
-    if (isSceneChanging) {
-      console.log("Sincronización automática bloqueada por cambio manual reciente")
-      return
-    }
-
-    // Aumentamos significativamente el umbral de diferencia para evitar sincronizaciones innecesarias
-    // Solo sincronizar si hay una diferencia muy grande (más de 3 segundos)
-    if (Math.abs(currentTime - audioCurrentTime) > 3.0) {
-      console.log(
-        `Diferencia de tiempo significativa detectada: storyboard=${currentTime.toFixed(2)}s, audio=${audioCurrentTime.toFixed(2)}s`,
-      )
-
-      // Decidir cuál es la fuente de verdad (en este caso, el audio)
-      setCurrentTime(audioCurrentTime)
-
-      // Encontrar la toma correspondiente a este tiempo
-      const shots = getAllShots(internalScenes)
-      const shot = findShotAtTime(shots, audioCurrentTime)
-
-      if (shot && (shot.sceneIndex !== activeSceneIndex || shot.imageIndex !== activeImageIndex)) {
-        // Registrar la intención de sincronización antes de realizarla
-        console.log(
-          `Sincronización automática necesaria: Escena ${shot.sceneIndex}, Toma ${shot.imageIndex} (desde Escena ${activeSceneIndex}, Toma ${activeImageIndex})`,
-        )
-
-        // Actualizar los índices sin volver a sincronizar el audio (para evitar bucles)
-        setActiveSceneIndex(shot.sceneIndex)
-        setActiveImageIndex(shot.imageIndex)
-        console.log(`Sincronizando índices por tiempo de audio: Escena ${shot.sceneIndex}, Toma ${shot.imageIndex}`)
-      }
-    }
-  }, [
-    currentTime,
-    audioCurrentTime,
-    internalScenes,
-    activeSceneIndex,
-    activeImageIndex,
-    autoSyncAudioWithShots,
-    isSceneChanging,
-    setCurrentTime,
-    manualSceneSelection,
-  ])
 
   const seekToPosition = useCallback(
     (time: number) => {
-      // Al buscar una posición específica, desactivamos el modo de selección manual
-      setManualSceneSelection(false)
-
       setCurrentTime(time)
 
       if (audioRef.current) {
@@ -849,7 +657,7 @@ export function StoryboardEditor({ projectId, userId, scenes: scriptScenes, onSc
         setActiveImageIndex(shot.imageIndex)
       }
     },
-    [internalScenes, setCurrentTime],
+    [internalScenes],
   )
 
   const updateImageDescription = useCallback(
@@ -857,12 +665,10 @@ export function StoryboardEditor({ projectId, userId, scenes: scriptScenes, onSc
       if (!activeImage) return
 
       // Update image descriptions state
-      setImageDescriptions((prev) => {
-        return {
-          ...prev,
-          [activeImage.id]: description,
-        }
-      })
+      setImageDescriptions((prev) => ({
+        ...prev,
+        [activeImage.id]: description,
+      }))
 
       // Update internal scenes
       setInternalScenes((prev) => {
@@ -934,44 +740,6 @@ export function StoryboardEditor({ projectId, userId, scenes: scriptScenes, onSc
 
     setTotalDuration(duration)
   }, [internalScenes])
-
-  // Definir handleSceneMasterClockTimeUpdate aquí, junto con los otros useCallback
-  const handleSceneMasterClockTimeUpdate = useCallback(
-    (sceneIndex: number, time: number, accumulatedTime?: number, totalDuration?: number) => {
-      // Si estamos en modo de selección manual, NO actualizar el tiempo global
-      if (manualSceneSelection && sceneIndex !== activeSceneIndex) {
-        console.log("Actualización de tiempo bloqueada: modo de selección manual activo")
-        return
-      }
-
-      // Usar setTimeout para evitar actualizaciones de estado durante el renderizado
-      setTimeout(() => {
-        // Calcular el tiempo global basado en el tiempo acumulado y el tiempo dentro de la escena
-        const newGlobalTime = (accumulatedTime || 0) + time
-
-        // Actualizar el tiempo actual solo si ha cambiado significativamente
-        if (Math.abs(currentTime - newGlobalTime) > 0.1) {
-          setCurrentTime(newGlobalTime)
-
-          // Actualizar el tiempo de audio solo si es necesario y el audio está listo
-          if (audioRef.current && Math.abs(audioRef.current.currentTime - newGlobalTime) > 0.5) {
-            try {
-              if (audioRef.current.readyState >= 2) {
-                // HAVE_CURRENT_DATA o superior
-                audioRef.current.currentTime = newGlobalTime
-                console.log(`Audio actualizado por SceneMasterClock: ${newGlobalTime.toFixed(2)}s`)
-              } else {
-                console.warn("Audio no listo para actualizar desde SceneMasterClock")
-              }
-            } catch (error) {
-              console.error("Error al actualizar tiempo de audio desde SceneMasterClock:", error)
-            }
-          }
-        }
-      }, 0)
-    },
-    [currentTime, setCurrentTime, manualSceneSelection, activeSceneIndex],
-  )
 
   const updateCameraSetting = useCallback(
     (setting: keyof CameraSettings, value: string) => {
@@ -1253,29 +1021,6 @@ export function StoryboardEditor({ projectId, userId, scenes: scriptScenes, onSc
     calculateTotalDuration()
   }, [internalScenes, calculateTotalDuration])
 
-  // Añadir este useEffect después de los otros useEffects relacionados con el audio
-  useEffect(() => {
-    // Sincronizar periódicamente para evitar desviaciones, pero con un intervalo mucho más largo
-    // y solo si no estamos en modo de selección manual
-    const syncInterval = setInterval(() => {
-      if (!manualSceneSelection) {
-        syncTimeReferences()
-      }
-    }, 10000) // Cambiar a 10 segundos
-
-    return () => clearInterval(syncInterval)
-  }, [syncTimeReferences, manualSceneSelection])
-
-  // Cambiar el nombre de la función para reflejar la nueva funcionalidad
-  const handleEnterAmplifiedMode = useCallback(() => {
-    setIsAmplifiedMode(true)
-  }, [])
-
-  // Cambiar el nombre de la función para reflejar la nueva funcionalidad
-  const handleExitAmplifiedMode = useCallback(() => {
-    setIsAmplifiedMode(false)
-  }, [])
-
   // === RENDER LOGIC ===
   if (!activeScene || !activeScene.images || activeScene.images.length === 0) {
     return (
@@ -1284,6 +1029,13 @@ export function StoryboardEditor({ projectId, userId, scenes: scriptScenes, onSc
         <Button onClick={addImageToScene}>Añadir primera imagen</Button>
       </div>
     )
+  }
+
+  const handleSceneMasterClockTimeUpdate = (time: number) => {
+    setCurrentTime(time)
+    if (audioRef.current) {
+      audioRef.current.currentTime = time
+    }
   }
 
   return (
@@ -1326,8 +1078,6 @@ export function StoryboardEditor({ projectId, userId, scenes: scriptScenes, onSc
         </div>
       )}
 
-      {/* Eliminar el indicador de modo de selección manual para que solo aparezca en consola */}
-
       <div className="flex flex-row h-full w-full">
         {/* Contenido principal */}
         <div className="flex-grow w-full">
@@ -1335,8 +1085,6 @@ export function StoryboardEditor({ projectId, userId, scenes: scriptScenes, onSc
             <div className="space-y-0 w-full">
               {/* Viewer Area */}
               <Card className="overflow-hidden bg-[#1E1E1E] border-[#333333] w-full p-0">
-                {/* Modificar la parte donde se renderiza StoryboardViewer para añadir la prop onEnterFullscreen: */}
-                {/* Buscar el componente StoryboardViewer y añadir la prop onEnterFullscreen */}
                 <StoryboardViewer
                   activeImage={activeImage}
                   isPlaying={isPlaying}
@@ -1348,7 +1096,6 @@ export function StoryboardEditor({ projectId, userId, scenes: scriptScenes, onSc
                   onPrevImage={prevImage}
                   onGoToShotByIndex={(index) => goToShot(activeSceneIndex, index, !autoSyncAudioWithShots)}
                   onUpdateImageDuration={updateImageDuration}
-                  onEnterFullscreen={handleEnterAmplifiedMode}
                 />
 
                 {/* Timelines */}
@@ -1395,6 +1142,8 @@ export function StoryboardEditor({ projectId, userId, scenes: scriptScenes, onSc
                 togglePlayPause={togglePlayPause}
                 audioTrack={audioTrack}
               />
+
+              {/* Debug Audio Toggle */}
             </div>
           </div>
 
@@ -1403,7 +1152,7 @@ export function StoryboardEditor({ projectId, userId, scenes: scriptScenes, onSc
             <SceneMasterClock
               scenes={internalScenes}
               activeSceneIndex={activeSceneIndex}
-              setActiveScene={handleSceneChange} // Usar handleSceneChange en lugar de setActiveSceneIndex directamente
+              setActiveScene={setActiveSceneIndex} // Asegurarse de pasar la función correcta
               activeImageIndex={activeImageIndex}
               currentTime={currentTime}
               isPlaying={isPlaying}
@@ -1467,21 +1216,6 @@ export function StoryboardEditor({ projectId, userId, scenes: scriptScenes, onSc
           </div>
         </div>
       )}
-      {/* Cambiar el componente FullscreenViewer por AmplifiedViewer */}
-      <AmplifiedViewer
-        isOpen={isAmplifiedMode}
-        onClose={handleExitAmplifiedMode}
-        activeScene={activeScene}
-        activeImage={activeImage}
-        activeSceneIndex={activeSceneIndex}
-        activeImageIndex={activeImageIndex}
-        isPlaying={isPlaying}
-        onTogglePlayPause={togglePlayPause}
-        onNextImage={nextImage}
-        onPrevImage={prevImage}
-        onGoToShot={goToShot}
-        scenes={internalScenes}
-      />
     </>
   )
 }

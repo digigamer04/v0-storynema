@@ -2,7 +2,7 @@
 
 import { useRef, useEffect } from "react"
 import { Button } from "@/components/ui/button"
-import { Play, Pause, SkipBack, SkipForward, Maximize } from "lucide-react"
+import { Play, Pause, SkipBack, SkipForward } from "lucide-react"
 import type { StoryboardImage } from "./types"
 
 interface StoryboardViewerProps {
@@ -16,7 +16,6 @@ interface StoryboardViewerProps {
   onPrevImage: () => void
   onGoToShotByIndex: (index: number) => void
   onUpdateImageDuration: (duration: number) => void
-  onEnterFullscreen?: () => void
 }
 
 export function StoryboardViewer({
@@ -30,18 +29,7 @@ export function StoryboardViewer({
   onPrevImage,
   onGoToShotByIndex,
   onUpdateImageDuration,
-  onEnterFullscreen,
 }: StoryboardViewerProps) {
-  // Add this at the beginning of the component function, right after the destructuring of props
-  if (!activeImage) {
-    return (
-      <div className="relative w-full" style={{ height: "60vh" }}>
-        <div className="absolute inset-0 flex items-center justify-center bg-black">
-          <p className="text-white">No image selected</p>
-        </div>
-      </div>
-    )
-  }
   const videoRef = useRef<HTMLVideoElement>(null)
 
   const playVideo = async (videoElement: HTMLVideoElement) => {
@@ -72,10 +60,6 @@ export function StoryboardViewer({
   }
 
   const renderMedia = () => {
-    if (!activeImage) {
-      return null
-    }
-
     if (activeImage.url.endsWith(".mp4")) {
       return (
         <video
@@ -101,18 +85,6 @@ export function StoryboardViewer({
   return (
     <div className="relative w-full" style={{ height: "60vh" }}>
       <div className="absolute inset-0 flex items-start justify-center bg-black pt-2">{renderMedia()}</div>
-
-      {/* Botón de ampliar en la esquina superior izquierda */}
-      {onEnterFullscreen && (
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={onEnterFullscreen}
-          className="absolute top-2 left-2 text-white hover:bg-white/20 bg-black/40 z-10"
-        >
-          <Maximize className="h-5 w-5" />
-        </Button>
-      )}
 
       {showControls && (
         <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/80 to-transparent">

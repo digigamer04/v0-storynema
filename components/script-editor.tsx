@@ -52,11 +52,11 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 
 // Importar el componente MarkdownRenderer
 import MarkdownRenderer from "@/components/markdown-renderer"
-import { createScene, updateScene, deleteScene as deleteSceneDb, reorderScenes } from "@/lib/scenes" // Importar las nuevas funciones de escena
+import { createScene, updateScene, deleteScene as deleteSceneDb, reorderScenes } from "@/lib/scenes"
 import { toast } from "@/components/ui/use-toast"
 
-// Importar el administrador de estado
-import { saveScenes } from "@/lib/state-manager"
+// Importar el cache del proyecto
+import { projectCache } from "@/lib/project-cache"
 
 interface ScriptEditorProps {
   projectId: string
@@ -164,7 +164,8 @@ export function ScriptEditor({
       updatedScenes[activeSceneIdx] = updatedScene
       setScenesArray(updatedScenes)
 
-      saveScenes(projectId, updatedScenes)
+      // Actualizar cache
+      projectCache.updateScene(projectId, activeScene.id, { content })
 
       const newHistory = history.slice(0, historyIndex + 1)
       newHistory.push(content)
@@ -197,7 +198,8 @@ export function ScriptEditor({
     updatedScenes[activeSceneIdx] = updatedScene
     setScenesArray(updatedScenes)
 
-    saveScenes(projectId, updatedScenes)
+    // Actualizar cache
+    projectCache.updateScene(projectId, activeScene.id, { title })
 
     if (activeScene.id !== "new" && !activeScene.is_temporary) {
       updateScene(activeScene.id, { title }).catch((error) => console.error("Error updating scene title:", error))
@@ -259,7 +261,8 @@ export function ScriptEditor({
 
     setScenesArray(updatedScenes)
 
-    saveScenes(projectId, updatedScenes)
+    // Actualizar cache
+    projectCache.updateScenes(projectId, updatedScenes)
 
     if (activeSceneIdx === index) {
       setActiveSceneIdx(index - 1)
@@ -291,7 +294,8 @@ export function ScriptEditor({
 
     setScenesArray(updatedScenes)
 
-    saveScenes(projectId, updatedScenes)
+    // Actualizar cache
+    projectCache.updateScenes(projectId, updatedScenes)
 
     if (activeSceneIdx === index) {
       setActiveSceneIdx(index + 1)
@@ -310,7 +314,6 @@ export function ScriptEditor({
   }
 
   // Modificar la función reverseScenes para asegurar que la inversión se aplique profundamente en la base de datos
-
   const reverseScenes = async () => {
     if (scenesArray.length <= 1) return
 
@@ -332,8 +335,8 @@ export function ScriptEditor({
       // Actualizar el estado local con las escenas invertidas
       setScenesArray(reversedScenes)
 
-      // Guardar en el administrador de estado global
-      saveScenes(projectId, reversedScenes)
+      // Actualizar cache
+      projectCache.updateScenes(projectId, reversedScenes)
 
       // Actualizar el índice de la escena activa si es necesario
       if (activeSceneIdx !== null) {
@@ -387,23 +390,6 @@ export function ScriptEditor({
     }
   }
 
-  const saveCurrentState = useCallback(() => {
-    try {
-      // Guardar el estado actual con timestamp
-      localStorage.setItem(`storynema_scenes_${projectId}`, JSON.stringify(scenesArray))
-      localStorage.setItem(`storynema_last_update_time_${projectId}`, Date.now().toString())
-      localStorage.setItem(`storynema_last_update_source_${projectId}`, "script_editor")
-    } catch (error) {
-      console.error("Error saving current state:", error)
-    }
-  }, [projectId, scenesArray])
-
-  useEffect(() => {
-    if (scenesArray.length > 0) {
-      saveCurrentState()
-    }
-  }, [scenesArray, saveCurrentState])
-
   const addNewScene = async () => {
     try {
       const newSceneTitle = `ESCENA ${scenesArray.length + 1} - NUEVA ESCENA`
@@ -421,8 +407,8 @@ export function ScriptEditor({
       const updatedScenes = [...scenesArray, createdScene]
       setScenesArray(updatedScenes)
 
-      // Guardar en el administrador de estado global
-      saveScenes(projectId, updatedScenes)
+      // Actualizar cache
+      projectCache.addScene(projectId, createdScene)
 
       // Seleccionar la nueva escena
       setActiveSceneIdx(updatedScenes.length - 1)
@@ -471,8 +457,8 @@ export function ScriptEditor({
       const updatedScenes = scenesArray.filter((s) => s.id !== sceneId)
       setScenesArray(updatedScenes)
 
-      // Guardar en el administrador de estado global
-      saveScenes(projectId, updatedScenes)
+      // Actualizar cache
+      projectCache.removeScene(projectId, sceneId)
 
       // Reajustar order_index de las escenas restantes
       const reorderedSceneIds = updatedScenes.map((s, index) => {
@@ -909,58 +895,6 @@ export function ScriptEditor({
   const handleSelectVersion = (versionId: number) => {
     setSelectedVersionId(versionId)
   }
-
-  // Añadir un efecto para verificar cambios en el storyboard
-  useEffect(() => {
-    // Verificar si hay cambios desde el storyboard
-    const lastUpdateSource = localStorage.getItem(`storynema_last_update_source_${projectId}`)
-    const lastUpdateTime = localStorage.getItem(`storynema_last_update_time_${projectId}`)
-
-    if (lastUpdateSource === "storyboard" && lastUpdateTime) {
-      const timeSinceLastUpdate = Date.now() - Number.parseInt(lastUpdateTime)
-
-      // Solo procesar cambios recientes (menos de 5 segundos)
-      if (timeSinceLastUpdate < 5000) {
-        try {
-          const savedScenes = localStorage.getItem(`storynema_scenes_${projectId}`)
-          if (savedScenes) {
-            const parsedScenes = JSON.parse(savedScenes)
-
-            // Verificar si hay cambios reales comparando contenido y orden
-            const hasChanges =
-              parsedScenes.length !== scenesArray.length ||
-              parsedScenes.some((scene, index) => {
-                const currentScene = scenesArray[index]
-                return (
-                  !currentScene ||
-                  scene.id !== currentScene.id ||
-                  scene.title !== currentScene.title ||
-                  scene.content !== currentScene.content ||
-                  scene.order_index !== currentScene.order_index
-                )
-              })
-
-            if (hasChanges) {
-              console.log("Detectados cambios desde el storyboard, actualizando editor de guiones")
-              // Ordenar las escenas por order_index antes de actualizar
-              const sortedScenes = [...parsedScenes].sort((a, b) => {
-                if (a.order_index !== undefined && b.order_index !== undefined) {
-                  return a.order_index - b.order_index
-                }
-                return 0
-              })
-              setScenesArray(sortedScenes)
-            }
-          }
-        } catch (error) {
-          console.error("Error checking for storyboard changes:", error)
-        }
-      }
-    }
-
-    // Ejecutar este efecto solo cuando cambie el projectId
-    // No incluir scenesArray en las dependencias para evitar bucles
-  }, [projectId])
 
   if (!scenesArray || scenesArray.length === 0) {
     return (

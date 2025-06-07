@@ -1,5 +1,4 @@
-import { createServerSupabaseClientWithCookies } from "./supabase"
-import type { ReadonlyRequestCookies } from "next/dist/server/web/spec-extension/adapters/request-cookies"
+import { createServerSupabaseClient, createServerSupabaseClientWithCookies } from "./supabase"
 
 // Obtener un proyecto por ID
 export async function getProject(projectId: string, cookieStore?: any) {
@@ -88,7 +87,7 @@ export async function getUserProjects(userId: string) {
 }
 
 // Crear un nuevo proyecto
-export async function createProject(projectData: any, cookieStore: ReadonlyRequestCookies) {
+export async function createProject(projectData: any) {
   try {
     console.log(`Creando proyecto: ${projectData.title} para usuario: ${projectData.user_id}`)
 
@@ -97,8 +96,8 @@ export async function createProject(projectData: any, cookieStore: ReadonlyReque
       throw new Error("Título y ID de usuario son requeridos")
     }
 
-    // Crear cliente de Supabase que respete RLS
-    const supabase = createServerSupabaseClientWithCookies(cookieStore)
+    // Crear cliente de Supabase
+    const supabase = createServerSupabaseClient()
 
     // Crear el proyecto
     const { data: project, error } = await supabase.from("projects").insert(projectData).select().single()
@@ -121,7 +120,7 @@ export async function createProject(projectData: any, cookieStore: ReadonlyReque
 }
 
 // Actualizar un proyecto
-export async function updateProject(projectId: string, data: any, cookieStore: ReadonlyRequestCookies) {
+export async function updateProject(projectId: string, data: any) {
   try {
     console.log(`Actualizando proyecto: ${projectId}`)
 
@@ -130,8 +129,8 @@ export async function updateProject(projectId: string, data: any, cookieStore: R
       throw new Error("ID de proyecto y datos son requeridos")
     }
 
-    // Crear cliente de Supabase que respete RLS
-    const supabase = createServerSupabaseClientWithCookies(cookieStore)
+    // Crear cliente de Supabase
+    const supabase = createServerSupabaseClient()
 
     // Actualizar el proyecto
     const { data: project, error } = await supabase.from("projects").update(data).eq("id", projectId).select().single()
@@ -150,7 +149,7 @@ export async function updateProject(projectId: string, data: any, cookieStore: R
 }
 
 // Eliminar un proyecto
-export async function deleteProject(projectId: string, cookieStore: ReadonlyRequestCookies) {
+export async function deleteProject(projectId: string) {
   try {
     console.log(`Eliminando proyecto: ${projectId}`)
 
@@ -159,8 +158,8 @@ export async function deleteProject(projectId: string, cookieStore: ReadonlyRequ
       throw new Error("ID de proyecto es requerido")
     }
 
-    // Crear cliente de Supabase que respete RLS
-    const supabase = createServerSupabaseClientWithCookies(cookieStore)
+    // Crear cliente de Supabase
+    const supabase = createServerSupabaseClient()
 
     // Eliminar el proyecto
     const { error } = await supabase.from("projects").delete().eq("id", projectId)
@@ -179,7 +178,7 @@ export async function deleteProject(projectId: string, cookieStore: ReadonlyRequ
 }
 
 // Clonar un proyecto
-export async function cloneProject(projectId: string, newTitle: string, cookieStore: ReadonlyRequestCookies) {
+export async function cloneProject(projectId: string, newTitle: string) {
   try {
     console.log(`Clonando proyecto: ${projectId} con nuevo título: ${newTitle}`)
 
@@ -188,8 +187,8 @@ export async function cloneProject(projectId: string, newTitle: string, cookieSt
       throw new Error("ID de proyecto y nuevo título son requeridos")
     }
 
-    // Crear cliente de Supabase que respete RLS
-    const supabase = createServerSupabaseClientWithCookies(cookieStore)
+    // Crear cliente de Supabase
+    const supabase = createServerSupabaseClient()
 
     // Obtener el proyecto original
     const { data: originalProject, error: projectError } = await supabase
@@ -237,7 +236,7 @@ export async function cloneProject(projectId: string, newTitle: string, cookieSt
 }
 
 // Crear copia de seguridad de un proyecto
-export async function backupProject(projectId: string, cookieStore: ReadonlyRequestCookies) {
+export async function backupProject(projectId: string) {
   try {
     console.log(`Creando copia de seguridad del proyecto: ${projectId}`)
 
@@ -246,8 +245,8 @@ export async function backupProject(projectId: string, cookieStore: ReadonlyRequ
       throw new Error("ID de proyecto es requerido")
     }
 
-    // Crear cliente de Supabase que respete RLS
-    const supabase = createServerSupabaseClientWithCookies(cookieStore)
+    // Crear cliente de Supabase
+    const supabase = createServerSupabaseClient()
 
     // Simplemente retornar true, the actual implementation is in the route handler
     return true
@@ -258,7 +257,7 @@ export async function backupProject(projectId: string, cookieStore: ReadonlyRequ
 }
 
 // Restaurar copia de seguridad de un proyecto
-export async function restoreProject(backupId: string, cookieStore: ReadonlyRequestCookies) {
+export async function restoreProject(backupId: string) {
   try {
     console.log(`Restaurando copia de seguridad del proyecto con ID: ${backupId}`)
 
@@ -267,8 +266,8 @@ export async function restoreProject(backupId: string, cookieStore: ReadonlyRequ
       throw new Error("ID de copia de seguridad es requerido")
     }
 
-    // Crear cliente de Supabase que respete RLS
-    const supabase = createServerSupabaseClientWithCookies(cookieStore)
+    // Crear cliente de Supabase
+    const supabase = createServerSupabaseClient()
 
     // Simplemente retornar true, the actual implementation is in the route handler
     return true
