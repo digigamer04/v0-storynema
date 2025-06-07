@@ -3,6 +3,7 @@
 import type React from "react"
 import Image from "next/image"
 import { TimelineGrid } from "@/app/editor/timeline/TimelineGrid"
+import { formatTimeWithMilliseconds } from "@/utils/time"
 
 interface Shot {
   id: string
@@ -106,12 +107,7 @@ export function ShotsTimelineTrack({
   }
 
   // Format time in mm:ss.ms
-  const formatTime = (time: number) => {
-    const minutes = Math.floor(time / 60)
-    const seconds = Math.floor(time % 60)
-    const ms = Math.floor((time % 1) * 100)
-    return `${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}.${ms.toString().padStart(2, "0")}`
-  }
+  const formatTime = (time: number) => formatTimeWithMilliseconds(time)
 
   const isPlayheadNearMagneticPoint = () => {
     if (!isMagnetismEnabled || !magneticPoints) return false

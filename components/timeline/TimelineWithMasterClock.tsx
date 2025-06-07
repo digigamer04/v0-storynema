@@ -3,6 +3,7 @@
 import type React from "react"
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react"
+import { formatTimeWithMilliseconds } from "@/utils/time"
 import { Button } from "@/components/ui/button"
 import { ArrowDownToLine, ArrowUpToLine, Clock, Film, Mic } from "lucide-react"
 import { useTimelineGrid } from "@/lib/hooks/useTimelineGrid"
@@ -310,10 +311,7 @@ export function TimelineContainer({
 
   // Formatear tiempo (mm:ss.ms)
   const formatTime = useCallback((seconds: number) => {
-    const mins = Math.floor(seconds / 60)
-    const secs = Math.floor(seconds % 60)
-    const ms = Math.floor((seconds % 1) * 100)
-    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}.${ms.toString().padStart(2, "0")}`
+    return formatTimeWithMilliseconds(seconds)
   }, [])
 
   // Formatear tiempo SMPTE (hh:mm:ss:ff)

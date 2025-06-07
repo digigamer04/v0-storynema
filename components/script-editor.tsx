@@ -57,6 +57,7 @@ import { toast } from "@/components/ui/use-toast"
 
 // Importar el administrador de estado
 import { saveScenes } from "@/lib/state-manager"
+import SceneList from "@/components/script/SceneList"
 
 interface ScriptEditorProps {
   projectId: string
@@ -997,67 +998,11 @@ export function ScriptEditor({
               </div>
             </div>
             <div className="space-y-2">
-              {scenesArray
-                .sort((a, b) => a.order_index - b.order_index)
-                .map((scene, index) => (
-                  <div
-                    key={scene.id}
-                    className={`p-2 rounded-md cursor-pointer flex justify-between items-center ${
-                      activeScene.id === scene.id ? "bg-[#3A3A3A]" : "hover:bg-[#2A2A2A]"
-                    }`}
-                    onClick={() => handleSceneChange(scene.id)}
-                  >
-                    <div className="truncate text-sm text-gray-200 flex-grow">
-                      {scene.title.length > 30 ? scene.title.substring(0, 30) + "..." : scene.title}
-                    </div>
-                    <div className="flex items-center">
-                      {isReordering && (
-                        <>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              moveSceneUp(index)
-                            }}
-                            className="h-6 w-6 p-0 text-gray-400 hover:text-white"
-                            disabled={index === 0}
-                            title="Mover arriba"
-                          >
-                            <MoveUp className="h-3 w-3" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              moveSceneDown(index)
-                            }}
-                            className="h-6 w-6 p-0 text-gray-400 hover:text-white"
-                            disabled={index === scenesArray.length - 1}
-                            title="Mover abajo"
-                          >
-                            <MoveDown className="h-3 w-3" />
-                          </Button>
-                        </>
-                      )}
-                      {scenesArray.length > 1 && (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            deleteScene(scene.id)
-                          }}
-                          className="h-6 w-6 p-0 opacity-50 hover:opacity-100 text-gray-400 hover:text-red-400"
-                          title="Eliminar escena"
-                        >
-                          <Trash2 className="h-3 w-3" />
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                ))}
+              <SceneList
+                scenes={scenesArray.sort((a, b) => a.order_index - b.order_index)}
+                activeSceneId={activeScene.id}
+                onSelect={handleSceneChange}
+              />
             </div>
           </CardContent>
         </Card>
