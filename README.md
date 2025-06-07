@@ -33,10 +33,10 @@ Continue building your app on:
 
 To run the project locally or in production you must define the Supabase credentials:
 
-```
+\`\`\`
 NEXT_PUBLIC_SUPABASE_URL=<your-supabase-url>
 NEXT_PUBLIC_SUPABASE_ANON_KEY=<your-anon-key>
 SUPABASE_SERVICE_ROLE_KEY=<your-service-role-key>
-```
+\`\`\`
 
 Create a `.env` file based on `.env.example` with these values.
