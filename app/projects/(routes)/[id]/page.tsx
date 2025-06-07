@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useState, useEffect, useRef } from "react"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
 import { ArrowLeft, Download, Save, Share2, Sparkles } from "lucide-react"
 import Link from "next/link"
@@ -500,33 +500,35 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
               <TabsTrigger value="storyboard">Storyboard</TabsTrigger>
               <TabsTrigger value="settings">Configuración</TabsTrigger>
             </TabsList>
-            <TabsContent value="script" className="flex-grow overflow-auto">
-              <ScriptEditor
-                projectId={params.id}
-                scenes={scenes}
-                setScenes={handleScenesUpdate}
-                activeSceneIndex={activeSceneIndex}
-                setActiveSceneIndex={handleSetActiveSceneIndex}
-                generatedContent={generatedContent}
-                setGeneratedContent={setGeneratedContent}
-                aiSuggestions={aiSuggestions}
-                onApplySuggestion={applySuggestion}
-              />
-            </TabsContent>
-            <TabsContent value="storyboard" className="flex-grow overflow-auto">
-              <StoryboardContainer
-                projectId={params.id}
-                userId={userId || "anonymous"}
-                scenes={scenes}
-                setScenes={setScenes}
-                onScenesUpdate={handleScenesUpdate}
-                activeSceneIndex={activeSceneIndex}
-                setActiveSceneIndex={setActiveSceneIndex}
-              />
-            </TabsContent>
-            <TabsContent value="settings" className="flex-grow overflow-auto">
-              <ProjectSettings projectId={params.id} projectTitle={projectTitle} setProjectTitle={setProjectTitle} />
-            </TabsContent>
+            <div className="flex-grow overflow-auto">
+              <div className={activeTab === "script" ? "h-full" : "hidden"}>
+                <ScriptEditor
+                  projectId={params.id}
+                  scenes={scenes}
+                  setScenes={handleScenesUpdate}
+                  activeSceneIndex={activeSceneIndex}
+                  setActiveSceneIndex={handleSetActiveSceneIndex}
+                  generatedContent={generatedContent}
+                  setGeneratedContent={setGeneratedContent}
+                  aiSuggestions={aiSuggestions}
+                  onApplySuggestion={applySuggestion}
+                />
+              </div>
+              <div className={activeTab === "storyboard" ? "h-full" : "hidden"}>
+                <StoryboardContainer
+                  projectId={params.id}
+                  userId={userId || "anonymous"}
+                  scenes={scenes}
+                  setScenes={setScenes}
+                  onScenesUpdate={handleScenesUpdate}
+                  activeSceneIndex={activeSceneIndex}
+                  setActiveSceneIndex={setActiveSceneIndex}
+                />
+              </div>
+              <div className={activeTab === "settings" ? "h-full" : "hidden"}>
+                <ProjectSettings projectId={params.id} projectTitle={projectTitle} setProjectTitle={setProjectTitle} />
+              </div>
+            </div>
           </Tabs>
         </div>
       </div>

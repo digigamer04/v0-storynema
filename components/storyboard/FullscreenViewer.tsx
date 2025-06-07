@@ -18,7 +18,7 @@ import {
   Settings,
 } from "lucide-react"
 import type { StoryboardImage, StoryboardScene, CameraSettings } from "./types"
-import { formatTime } from "@/utils/time"
+import { formatTime } from "./utils"
 
 interface FullscreenViewerProps {
   isOpen: boolean

@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent } from "@/components/ui/dialog"
 import { X, Play, Pause, SkipBack, SkipForward, Info, Camera, Clock, Film, Settings } from "lucide-react"
 import type { StoryboardImage, StoryboardScene, CameraSettings } from "./types"
-import { formatTime } from "@/utils/time"
+import { formatTime } from "./utils"
 
 // Importar el sistema de gestión de descripciones
 import { getDescriptionWithFallback, DescriptionType } from "@/lib/description-manager"

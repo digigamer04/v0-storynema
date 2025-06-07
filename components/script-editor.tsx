@@ -57,7 +57,6 @@ import { toast } from "@/components/ui/use-toast"
 
 // Importar el administrador de estado
 import { saveScenes } from "@/lib/state-manager"
-import SceneList from "@/components/script/SceneList"
 
 interface ScriptEditorProps {
   projectId: string
@@ -172,11 +171,7 @@ export function ScriptEditor({
       setHistory(newHistory)
       setHistoryIndex(newHistory.length - 1)
 
-      if (activeScene.id !== "new" && !activeScene.is_temporary) {
-        updateScene(activeScene.id, { content }).catch((error) => console.error("Error updating scene content:", error))
-      } else {
-        console.log("Omitiendo actualización de escena temporal en la base de datos")
-      }
+      updateScene(activeScene.id, { content }).catch((error) => console.error("Error updating scene content:", error))
     },
     [activeScene, activeSceneIdx, projectId, scenesArray, setScenesArray, history, historyIndex],
   )
@@ -200,11 +195,7 @@ export function ScriptEditor({
 
     saveScenes(projectId, updatedScenes)
 
-    if (activeScene.id !== "new" && !activeScene.is_temporary) {
-      updateScene(activeScene.id, { title }).catch((error) => console.error("Error updating scene title:", error))
-    } else {
-      console.log("Omitiendo actualización de escena temporal en la base de datos")
-    }
+    updateScene(activeScene.id, { title }).catch((error) => console.error("Error updating scene title:", error))
   }
 
   const handleSceneChange = (sceneId: string) => {
@@ -407,18 +398,27 @@ export function ScriptEditor({
 
   const addNewScene = async () => {
     try {
-      // Crear una escena temporal en memoria
-      const tempScene = {
-        id: `temp-${Date.now()}`, // Asegurar un ID único
-        project_id: projectId,
-        title: `ESCENA ${scenesArray.length + 1} - NUEVA ESCENA`,
-        content: "",
-        order_index: scenesArray.length,
-        is_temporary: true,
+      toast({
+        title: "Creando nueva escena...",
+        description: "Por favor, espera un momento.",
+      })
+
+      const response = await fetch(`/api/projects/${projectId}/scenes`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({}), // El backend se encarga de los valores por defecto
+      })
+
+      if (!response.ok) {
+        throw new Error("No se pudo crear la escena en el servidor.")
       }
 
-      // Actualizar el estado local
-      const updatedScenes = [...scenesArray, tempScene]
+      const newScene = await response.json()
+
+      // Actualizar el estado local con la escena real
+      const updatedScenes = [...scenesArray, newScene]
       setScenesArray(updatedScenes)
 
       // Guardar en el administrador de estado global
@@ -440,11 +440,9 @@ export function ScriptEditor({
       }
       setVersions([initialVersion])
 
-      // Mostrar un mensaje informativo
       toast({
-        title: "Escena temporal creada",
-        description: "Estás trabajando con una escena temporal. Guarda el proyecto para persistir los cambios.",
-        duration: 5000,
+        title: "Escena creada",
+        description: "La nueva escena se ha guardado correctamente.",
       })
     } catch (error) {
       console.error("Error creating new scene:", error)
@@ -998,11 +996,67 @@ export function ScriptEditor({
               </div>
             </div>
             <div className="space-y-2">
-              <SceneList
-                scenes={scenesArray.sort((a, b) => a.order_index - b.order_index)}
-                activeSceneId={activeScene.id}
-                onSelect={handleSceneChange}
-              />
+              {scenesArray
+                .sort((a, b) => a.order_index - b.order_index)
+                .map((scene, index) => (
+                  <div
+                    key={scene.id}
+                    className={`p-2 rounded-md cursor-pointer flex justify-between items-center ${
+                      activeScene.id === scene.id ? "bg-[#3A3A3A]" : "hover:bg-[#2A2A2A]"
+                    }`}
+                    onClick={() => handleSceneChange(scene.id)}
+                  >
+                    <div className="truncate text-sm text-gray-200 flex-grow">
+                      {scene.title.length > 30 ? scene.title.substring(0, 30) + "..." : scene.title}
+                    </div>
+                    <div className="flex items-center">
+                      {isReordering && (
+                        <>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              moveSceneUp(index)
+                            }}
+                            className="h-6 w-6 p-0 text-gray-400 hover:text-white"
+                            disabled={index === 0}
+                            title="Mover arriba"
+                          >
+                            <MoveUp className="h-3 w-3" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              moveSceneDown(index)
+                            }}
+                            className="h-6 w-6 p-0 text-gray-400 hover:text-white"
+                            disabled={index === scenesArray.length - 1}
+                            title="Mover abajo"
+                          >
+                            <MoveDown className="h-3 w-3" />
+                          </Button>
+                        </>
+                      )}
+                      {scenesArray.length > 1 && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            deleteScene(scene.id)
+                          }}
+                          className="h-6 w-6 p-0 opacity-50 hover:opacity-100 text-gray-400 hover:text-red-400"
+                          title="Eliminar escena"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                ))}
             </div>
           </CardContent>
         </Card>

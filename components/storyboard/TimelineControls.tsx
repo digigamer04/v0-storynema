@@ -4,7 +4,6 @@ import type React from "react"
 import { Slider } from "@/components/ui/slider"
 import { Button } from "@/components/ui/button"
 import { Volume2, VolumeX, X } from "lucide-react"
-import AudioControls from "./AudioControls"
 import type { AudioTrack, StoryboardScene, Shot } from "./types"
 
 interface TimelineControlsProps {
@@ -125,19 +124,54 @@ export function TimelineControls({
     <div className="p-4 space-y-4 bg-[#1E1E1E]">
       {/* Audio Timeline */}
       {audioTrack && !audioError && (
-        <AudioControls
-          audioTrack={audioTrack}
-          audioCurrentTime={audioCurrentTime}
-          audioDuration={audioDuration}
-          audioVolume={audioVolume}
-          audioMuted={audioMuted}
-          audioError={audioError}
-          formatTime={formatTime}
-          onToggleMute={onToggleMute}
-          onVolumeChange={onVolumeChange}
-          onRemoveAudio={onRemoveAudio}
-          onSeek={handleAudioTimelineClick}
-        />
+        <div className="space-y-2">
+          <div className="flex justify-between items-center">
+            <div className="text-xs text-gray-400">
+              {formatTime(audioCurrentTime)} / {formatTime(audioDuration)}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={onToggleMute}
+                className="h-8 w-8 text-gray-400 hover:text-white"
+              >
+                {audioMuted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
+              </Button>
+
+              <div className="w-24">
+                <Slider
+                  value={[audioVolume]}
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  onValueChange={(values) => onVolumeChange(values[0])}
+                  disabled={audioMuted}
+                />
+              </div>
+
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={onRemoveAudio}
+                className="h-8 w-8 text-gray-400 hover:text-white hover:bg-red-500/20"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+
+          <div
+            className="relative h-2 bg-gray-700 rounded-full cursor-pointer overflow-hidden"
+            onClick={handleAudioTimelineClick}
+          >
+            <div
+              className="absolute h-full bg-blue-500"
+              style={{ width: `${(audioCurrentTime / audioDuration) * 100}%` }}
+            />
+          </div>
+        </div>
       )}
 
       {/* Shots Timeline */}

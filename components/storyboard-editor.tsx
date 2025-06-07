@@ -77,7 +77,6 @@ import SceneMasterClock from "@/components/timeline/SceneMasterClock"
 // Añadir esta importación al principio del archivo, junto con las otras importaciones
 import HermeticScriptViewer from "@/components/hermetic-script-viewer"
 import ScriptSyncManager from "@/components/script-sync-manager"
-import { useAudioControls } from "@/hooks/useAudioControls"
 
 // Modificar la interfaz ScriptScene para que coincida con la estructura de las escenas del guion
 interface ScriptScene {
@@ -196,18 +195,12 @@ export function StoryboardEditor({
   // Añadir soporte para pista de audio master
   // Primero, añadir un nuevo estado para la pista de audio
   const [audioTrack, setAudioTrack] = useState<AudioTrack | null>(null)
-  const {
-    audioRef,
-    isPlaying: isAudioPlaying,
-    toggle: toggleAudioPlayback,
-    play,
-    pause,
-    volume: audioVolume,
-    setVolume: setAudioVolume,
-  } = useAudioControls()
+  const audioRef = useRef<HTMLAudioElement>(null)
+  const [audioVolume, setAudioVolume] = useState<number>(1)
   const [audioMuted, setAudioMuted] = useState<boolean>(false)
   const [audioDuration, setAudioDuration] = useState<number>(0)
   const [audioCurrentTime, setAudioCurrentTime] = useState<number>(0)
+  const [isAudioPlaying, setIsAudioPlaying] = useState<boolean>(false)
   const audioProgressIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const [audioError, setAudioError] = useState<string | null>(null)
   const [showDebugAudio, setShowDebugAudio] = useState<boolean>(false)
@@ -422,7 +415,7 @@ export function StoryboardEditor({
   // Modificar la función para eliminar la pista de audio
   const removeAudioTrack = () => {
     setAudioTrack(null)
-    pause()
+    setIsAudioPlaying(false)
     saveAudioTrackToLocalStorage(null) // Eliminar la pista de audio de localStorage
     if (audioRef.current) {
       audioRef.current.pause()
@@ -598,7 +591,7 @@ export function StoryboardEditor({
   }
 
   const handleAudioEnded = () => {
-    pause()
+    setIsAudioPlaying(false)
     setIsPlaying(false) // Detener también la reproducción de tomas
     setAudioCurrentTime(0)
     if (audioRef.current) {
@@ -781,7 +774,7 @@ export function StoryboardEditor({
           // También pausar el audio si está reproduciéndose
           if (audioRef.current && !audioRef.current.paused) {
             audioRef.current.pause()
-            pause()
+            setIsAudioPlaying(false)
           }
         }
       }, activeImage.duration * 1000)
@@ -843,10 +836,10 @@ export function StoryboardEditor({
         // Ahora reproducimos el audio
         audioRef.current
           .play()
-            .then(() => {
-              console.log("Audio reproduciendo correctamente")
-              play()
-              setAudioError(null)
+          .then(() => {
+            console.log("Audio reproduciendo correctamente")
+            setIsAudioPlaying(true)
+            setAudioError(null)
 
             // Iniciar el intervalo para actualizar el tiempo del audio
             if (audioProgressIntervalRef.current) {
@@ -870,7 +863,7 @@ export function StoryboardEditor({
       } else {
         // Si vamos a pausar
         audioRef.current.pause()
-        pause()
+        setIsAudioPlaying(false)
         if (audioProgressIntervalRef.current) {
           clearInterval(audioProgressIntervalRef.current)
         }
@@ -973,11 +966,26 @@ export function StoryboardEditor({
   }
 
   // Función para obtener el tiempo formateado (mm:ss)
-  const formatTime = (seconds: number) => utilsFormatTime(seconds)
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60)
+    const secs = Math.floor(seconds % 60)
+    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`
+  }
 
   // Función para calcular el tiempo de inicio de la toma actual
-  const calculateCurrentShotStartTime = () =>
-    storyboardCalculateStart(internalScenes, activeSceneIndex, activeImageIndex)
+  const calculateCurrentShotStartTime = () => {
+    let startTime = 0
+
+    if (!activeScene || activeImageIndex < 0) return startTime
+
+    for (let i = 0; i < activeImageIndex; i++) {
+      if (activeScene.images[i]) {
+        startTime += activeScene.images[i].duration
+      }
+    }
+
+    return startTime
+  }
 
   // Función para calcular el porcentaje de progreso
   const calculateProgress = () => {

@@ -2,7 +2,6 @@
 
 import type React from "react"
 import { useState, useEffect, useRef, useCallback } from "react"
-import { formatTime } from "@/utils/time"
 import { Button } from "@/components/ui/button"
 import { Play, Pause } from "lucide-react"
 import styles from "./SceneMasterClock.module.css"
@@ -207,6 +206,12 @@ const SceneMasterClock: React.FC<SceneMasterClockProps> = ({
     [getSceneStartTime, sceneDurations],
   )
 
+  // Formatear tiempo (mm:ss)
+  const formatTime = useCallback((seconds: number) => {
+    const mins = Math.floor(seconds / 60)
+    const secs = Math.floor(seconds % 60)
+    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`
+  }, [])
 
   // Actualizar lastActiveSceneIndexRef cuando cambia activeSceneIndex
   useEffect(() => {

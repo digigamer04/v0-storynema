@@ -3,7 +3,6 @@
 import type React from "react"
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react"
-import { formatTimeWithMilliseconds } from "@/utils/time"
 import { AudioTimelineTrack } from "./AudioTimelineTrack"
 import { ShotsTimelineTrack } from "./ShotsTimelineTrack"
 import { TimecodeRuler } from "./TimecodeRuler"
@@ -294,7 +293,10 @@ export function TimelineContainer({
 
   // Formatear tiempo (mm:ss.ms)
   const formatTime = useCallback((seconds: number) => {
-    return formatTimeWithMilliseconds(seconds)
+    const mins = Math.floor(seconds / 60)
+    const secs = Math.floor(seconds % 60)
+    const ms = Math.floor((seconds % 1) * 100)
+    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}.${ms.toString().padStart(2, "0")}`
   }, [])
 
   // Formatear tiempo SMPTE (hh:mm:ss:ff)

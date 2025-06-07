@@ -2,7 +2,6 @@
 
 import type React from "react"
 import { useEffect, useRef, useState } from "react"
-import { formatTimeWithMilliseconds } from "@/utils/time"
 import { Loader2 } from "lucide-react"
 import { generateSimulatedWaveform } from "@/lib/waveform-utils"
 import { TimelineGrid } from "@/components/timeline/timeline-grid"
@@ -100,8 +99,13 @@ export function AudioTimelineTrack({
     onSeek(percent)
   }
 
-  // Formatear el tiempo (mm:ss.ms)
-  const formatTime = (time: number) => formatTimeWithMilliseconds(time)
+  // Función para formatear el tiempo (mm:ss.ms)
+  const formatTime = (time: number) => {
+    const minutes = Math.floor(time / 60)
+    const seconds = Math.floor(time % 60)
+    const ms = Math.floor((time % 1) * 100)
+    return `${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}.${ms.toString().padStart(2, "0")}`
+  }
 
   // Verificar si el playhead está cerca de un punto magnético
   const isPlayheadNearMagneticPoint = () => {

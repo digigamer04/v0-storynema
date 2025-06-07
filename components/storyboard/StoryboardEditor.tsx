@@ -27,13 +27,13 @@ import type {
   FavoriteCamera,
   FavoriteLens,
 } from "./types"
-import { DEFAULT_CAMERA_SETTINGS } from "./utils"
-import { formatTime as utilsFormatTime } from "@/utils/time"
 import {
-  calculateCurrentShotStartTime as storyboardCalculateStart,
+  formatTime,
+  DEFAULT_CAMERA_SETTINGS,
+  calculateCurrentShotStartTime,
   getAllShots,
   findShotAtTime,
-} from "@/utils/storyboard"
+} from "./utils"
 
 // Importar el sistema mejorado de gestión de descripciones
 import {

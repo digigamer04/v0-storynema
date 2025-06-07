@@ -28,13 +28,3 @@ Continue building your app on:
 2. Deploy your chats from the v0 interface
 3. Changes are automatically pushed to this repository
 4. Vercel deploys the latest version from this repository
-
-## Estructura Modular
-
-El código se organiza en módulos reutilizables:
-
-- **utils/** contiene funciones compartidas como manejo de tiempo y cálculos de tomas.
-- **hooks/** alberga hooks personalizados como `useAudioControls` y `useSceneSync`.
-- **components/storyboard/** y **components/script/** agrupan subcomponentes de cada vista.
-
-Esta estructura facilita la reutilización y simplifica el mantenimiento.
