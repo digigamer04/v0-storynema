@@ -13,6 +13,7 @@ import GeminiIntegration from "@/components/gemini-integration"
 import { toast } from "@/components/ui/use-toast"
 import { createClientSupabaseClient } from "@/lib/supabase"
 import { cleanupProjectData } from "@/lib/project-isolation"
+import { subscribeToProjectScenes } from "@/lib/realtime"
 
 export default function ProjectPage({ params }: { params: { id: string } }) {
   const router = useRouter()
@@ -219,6 +220,28 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
 
     fetchProjectData()
   }, [params.id, userId, router])
+
+  // Subscribe to realtime updates for scenes
+  useEffect(() => {
+    if (!userId) return
+    const unsubscribe = subscribeToProjectScenes(params.id, ({ eventType, scene }) => {
+      setScenes((prev) => {
+        if (eventType === "DELETE") {
+          return prev.filter((s) => s.id !== scene.id)
+        }
+        const index = prev.findIndex((s) => s.id === scene.id)
+        if (index === -1) {
+          return [...prev, scene].sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0))
+        }
+        const updated = [...prev]
+        updated[index] = { ...updated[index], ...scene }
+        return updated
+      })
+    })
+    return () => {
+      unsubscribe()
+    }
+  }, [params.id, userId])
 
   // Función para generar sugerencias de IA basadas en el guion actual
   const generateAiSuggestions = useCallback(() => {
