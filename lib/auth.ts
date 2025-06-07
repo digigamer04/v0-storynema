@@ -55,6 +55,19 @@ export async function isResourceOwner(userId: string, resourceUserId: string) {
 export async function getUserClient() {
   try {
     const supabase = createClientSupabaseClient()
+
+    // Primero intentar refrescar la sesión
+    const { data: session, error: refreshError } = await supabase.auth.refreshSession()
+
+    if (refreshError) {
+      console.warn("No se pudo refrescar la sesión:", refreshError.message)
+      // Si no se puede refrescar, intentar obtener la sesión actual
+      const { data: currentSession } = await supabase.auth.getSession()
+      if (!currentSession.session) {
+        return null
+      }
+    }
+
     const { data, error } = await supabase.auth.getUser()
 
     if (error) {
@@ -66,6 +79,76 @@ export async function getUserClient() {
   } catch (error) {
     console.error("Error in getUserClient:", error)
     return null
+  }
+}
+
+// Función mejorada para verificar y renovar autenticación
+export async function ensureAuth() {
+  try {
+    const supabase = createClientSupabaseClient()
+
+    // Intentar refrescar la sesión primero
+    const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession()
+
+    if (refreshError || !refreshData.session) {
+      console.warn("Sesión expirada o no válida, redirigiendo a login")
+      // Limpiar cualquier sesión corrupta
+      await supabase.auth.signOut()
+      window.location.href = "/auth"
+      return null
+    }
+
+    return refreshData.session.user
+  } catch (error) {
+    console.error("Error ensuring auth:", error)
+    window.location.href = "/auth"
+    return null
+  }
+}
+
+// Función para hacer peticiones autenticadas con reintentos
+export async function authenticatedFetch(url: string, options: RequestInit = {}) {
+  try {
+    const user = await getUserClient()
+
+    if (!user) {
+      // Si no hay usuario, intentar renovar autenticación
+      const renewedUser = await ensureAuth()
+      if (!renewedUser) {
+        throw new Error("No authenticated user")
+      }
+    }
+
+    // Hacer la petición
+    const response = await fetch(url, {
+      ...options,
+      headers: {
+        ...options.headers,
+        "Content-Type": "application/json",
+      },
+    })
+
+    // Si es 401 (Unauthorized), intentar renovar token y reintentar
+    if (response.status === 401) {
+      console.log("Recibido 401, intentando renovar autenticación...")
+      const renewedUser = await ensureAuth()
+
+      if (renewedUser) {
+        // Reintentar la petición
+        return await fetch(url, {
+          ...options,
+          headers: {
+            ...options.headers,
+            "Content-Type": "application/json",
+          },
+        })
+      }
+    }
+
+    return response
+  } catch (error) {
+    console.error("Error in authenticated fetch:", error)
+    throw error
   }
 }
 

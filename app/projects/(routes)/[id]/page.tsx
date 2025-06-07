@@ -13,7 +13,7 @@ import GeminiIntegration from "@/components/gemini-integration"
 import { toast } from "@/components/ui/use-toast"
 import { createClientSupabaseClient } from "@/lib/supabase"
 import { cleanupProjectData } from "@/lib/project-isolation"
-import { subscribeToProjectScenes } from "@/lib/realtime"
+import { saveScenes as saveScenesToLocalStorage } from "@/lib/state-manager" // Importar para backup local
 
 export default function ProjectPage({ params }: { params: { id: string } }) {
   const router = useRouter()
@@ -30,9 +30,10 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     "Establecer el conflicto inicial de la trama.",
   ])
 
+  // Estados principales - FUENTE ÚNICA DE VERDAD
   const [scenes, setScenes] = useState([])
   const [activeSceneIndex, setActiveSceneIndex] = useState(0)
-  const [storyboardData, setStoryboardData] = useState(null)
+  const [storyboardData, setStoryboardData] = useState(null) // Mantener si es usado por StoryboardContainer
 
   // Referencia para el intervalo de generación de sugerencias
   const suggestionsIntervalRef = useRef<NodeJS.Timeout | null>(null)
@@ -62,55 +63,38 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     checkAuth()
   }, [router])
 
-  // Usar useCallback para optimizar las funciones de actualización
-  const handleScenesUpdate = useCallback(
+  // Función principal para manejar cambios de escenas (llamada por ScriptEditor y StoryboardContainer)
+  const handleScenesChange = useCallback(
     (updatedScenes) => {
-      setScenes(updatedScenes)
-      try {
-        // Usar un prefijo único que incluya el ID del proyecto
-        const storageKey = `storynema_scenes_${params.id}`
-        localStorage.setItem(storageKey, JSON.stringify(updatedScenes))
-        localStorage.setItem(`storynema_last_update_source_${params.id}`, "script_editor")
-        localStorage.setItem(`storynema_last_update_time_${params.id}`, Date.now().toString())
-      } catch (error) {
-        console.error("Error saving scenes to localStorage:", error)
-      }
+      console.info("ProjectPage", "Actualizando escenas (fuente única de verdad)", {
+        scenesCount: updatedScenes.length,
+        projectId: params.id,
+      })
+
+      // Asegurar order_index correcto y actualizar el estado principal
+      const scenesWithCorrectOrder = updatedScenes.map((scene, index) => ({
+        ...scene,
+        order_index: index,
+      }))
+      setScenes(scenesWithCorrectOrder)
+
+      // Guardar en localStorage como backup (usando el state manager)
+      saveScenesToLocalStorage(params.id, scenesWithCorrectOrder)
     },
     [params.id],
   )
 
-  const handleStoryboardScenesUpdate = useCallback(
-    (updatedScenes) => {
-      setScenes(updatedScenes)
-      try {
-        // Usar un prefijo único que incluya el ID del proyecto
-        const storageKey = `storynema_scenes_${params.id}`
-        localStorage.setItem(storageKey, JSON.stringify(updatedScenes))
-        localStorage.setItem(`storynema_last_update_source_${params.id}`, "storyboard")
-        localStorage.setItem(`storynema_last_update_time_${params.id}`, Date.now().toString())
-      } catch (error) {
-        console.error("Error saving scenes from storyboard to localStorage:", error)
-      }
+  // Función para manejar cambios de índice activo (llamada por ScriptEditor y StoryboardContainer)
+  const handleActiveSceneIndexChange = useCallback(
+    (newIndex) => {
+      console.info("ProjectPage", "Cambiando índice activo", {
+        oldIndex: activeSceneIndex,
+        newIndex,
+        projectId: params.id,
+      })
+      setActiveSceneIndex(newIndex)
     },
-    [params.id],
-  )
-
-  const handleSetActiveSceneIndex = useCallback((index: number) => {
-    setActiveSceneIndex(index)
-  }, [])
-
-  const handleStoryboardDataUpdate = useCallback(
-    (data) => {
-      setStoryboardData(data)
-      try {
-        // Usar un prefijo único que incluya el ID del proyecto
-        const storageKey = `storynema_storyboard_data_${params.id}`
-        localStorage.setItem(storageKey, JSON.stringify(data))
-      } catch (error) {
-        console.error("Error saving storyboard data to localStorage:", error)
-      }
-    },
-    [params.id],
+    [activeSceneIndex, params.id],
   )
 
   // Modificar el useEffect que carga los datos del proyecto para cargar también desde localStorage si es necesario
@@ -122,7 +106,7 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
         setIsLoading(true)
         setError(null)
 
-        console.log("Fetching project data for ID:", params.id)
+        console.info("ProjectPage", "Cargando datos del proyecto", { projectId: params.id, userId })
 
         // Limpiar datos de localStorage de otros proyectos
         cleanupProjectData(params.id)
@@ -135,57 +119,69 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
           .single()
 
         if (projectError) {
-          console.error("Project not found:", projectError)
+          console.error("ProjectPage", "Proyecto no encontrado", { error: projectError.message })
           setError("Proyecto no encontrado")
           setIsLoading(false)
           return
         }
 
         if (projectData.user_id !== userId) {
-          console.error("User does not own this project:", userId, projectData.user_id)
+          console.error("ProjectPage", "Sin permisos para el proyecto", { userId, projectUserId: projectData.user_id })
           setError("No tienes permiso para ver este proyecto")
           setIsLoading(false)
           return
         }
 
-        console.log("Project data loaded:", projectData.title)
+        console.info("ProjectPage", "Proyecto cargado", { title: projectData.title })
         setProjectTitle(projectData.title)
 
+        // Intentar cargar desde localStorage primero
         let loadedScenes = null
         try {
           const savedScenes = localStorage.getItem(`storynema_scenes_${params.id}`)
           if (savedScenes) {
             loadedScenes = JSON.parse(savedScenes)
-            console.log("Loaded scenes from localStorage:", loadedScenes.length)
+            console.info("ProjectPage", "Escenas cargadas desde localStorage", { count: loadedScenes.length })
           }
         } catch (error) {
-          console.error("Error loading scenes from localStorage:", error)
+          console.warn("ProjectPage", "Error cargando desde localStorage", { error: error.message })
         }
 
-        if (!loadedScenes) {
-          console.log("Fetching scenes for project:", params.id)
+        // Si no hay en localStorage, cargar desde Supabase
+        if (!loadedScenes || loadedScenes.length === 0) {
+          console.info("ProjectPage", "Cargando escenas desde Supabase")
           const { data: scenesData, error: scenesError } = await supabase
             .from("scenes")
             .select("*")
             .eq("project_id", params.id)
-            .order("order_index", { ascending: false })
+            .order("order_index", { ascending: true }) // Asegurar orden ascendente
 
           if (scenesError) {
-            console.error("Error fetching scenes:", scenesError)
+            console.error("ProjectPage", "Error cargando escenas", { error: scenesError.message })
             setError(`Error al cargar las escenas: ${scenesError.message}`)
             setIsLoading(false)
             return
           }
 
-          loadedScenes = scenesData
+          loadedScenes = scenesData || []
+          console.info("ProjectPage", "Escenas cargadas desde Supabase", { count: loadedScenes.length })
         }
 
-        if (loadedScenes && loadedScenes.length > 0) {
-          console.log("Using loaded scenes:", loadedScenes.length)
-          setScenes(loadedScenes)
-        } else {
-          console.log("No scenes found, using temporary scene")
+        // Asegurar que las escenas tengan order_index correcto y establecerlas
+        const scenesToSet = loadedScenes.map((scene, index) => ({
+          ...scene,
+          order_index: index,
+        }))
 
+        if (scenesToSet.length > 0) {
+          setScenes(scenesToSet)
+          setActiveSceneIndex(0) // Siempre empezar con la primera escena
+          console.info("ProjectPage", "Escenas establecidas", {
+            count: scenesToSet.length,
+            firstSceneTitle: scenesToSet[0]?.title,
+          })
+        } else {
+          // Crear escena temporal si no hay ninguna
           const tempScene = {
             id: `temp-${Date.now()}`,
             title: "ESCENA 1 - NUEVA ESCENA",
@@ -196,7 +192,9 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
           }
 
           setScenes([tempScene])
+          setActiveSceneIndex(0)
 
+          console.info("ProjectPage", "Escena temporal creada")
           toast({
             title: "Escena temporal creada",
             description: "Estás trabajando con una escena temporal. Guarda el proyecto para persistir los cambios.",
@@ -205,8 +203,8 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
         }
 
         setIsLoading(false)
-      } catch (error: any) {
-        console.error("Error loading project data:", error)
+      } catch (error) {
+        console.error("ProjectPage", "Error cargando proyecto", { error: error.message }, error)
         setError(`Error al cargar los datos del proyecto: ${error.message}`)
         setIsLoading(false)
 
@@ -219,28 +217,6 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     }
 
     fetchProjectData()
-  }, [params.id, userId, router])
-
-  // Subscribe to realtime updates for scenes
-  useEffect(() => {
-    if (!userId) return
-    const unsubscribe = subscribeToProjectScenes(params.id, ({ eventType, scene }) => {
-      setScenes((prev) => {
-        if (eventType === "DELETE") {
-          return prev.filter((s) => s.id !== scene.id)
-        }
-        const index = prev.findIndex((s) => s.id === scene.id)
-        if (index === -1) {
-          return [...prev, scene].sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0))
-        }
-        const updated = [...prev]
-        updated[index] = { ...updated[index], ...scene }
-        return updated
-      })
-    })
-    return () => {
-      unsubscribe()
-    }
   }, [params.id, userId])
 
   // Función para generar sugerencias de IA basadas en el guion actual
@@ -307,92 +283,98 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
   // Function to save the project
   const saveProject = async () => {
     try {
+      console.info("ProjectPage", "Iniciando guardado de proyecto", { scenesCount: scenes.length })
       const supabase = createClientSupabaseClient()
 
-      // Iterate through the scenes and update them in the database
+      // Iterar a través de las escenas y actualizarlas en la base de datos
+      // Las escenas en el estado `scenes` ya están ordenadas por `order_index`
       for (let i = 0; i < scenes.length; i++) {
         const scene = scenes[i]
-
-        // Asegurarse de que order_index siempre tenga un valor válido
-        const orderIndex = typeof scene.order_index === "number" ? scene.order_index : i
+        const orderIndex = i // El order_index es simplemente su posición en el array actual
 
         // Si la escena es temporal, crear una nueva escena en la base de datos
         if (scene.is_temporary || scene.id.startsWith("temp-")) {
-          console.log("Creating new scene from temporary scene:", scene.title, "with order_index:", orderIndex)
+          console.info("ProjectPage", "Creando escena desde temporal", {
+            title: scene.title,
+            orderIndex,
+          })
 
           const { data: newScene, error: newSceneError } = await supabase
             .from("scenes")
             .insert({
-              project_id: params.id, // Asegurar que se use el ID del proyecto actual
+              project_id: params.id,
               title: scene.title || "Nueva Escena",
               content: scene.content || "",
-              order_index: orderIndex, // Usar el índice calculado
+              order_index: orderIndex,
             })
             .select()
             .single()
 
           if (newSceneError) {
-            console.error("Error creating scene:", newSceneError)
+            console.error("ProjectPage", "Error creando escena", { error: newSceneError.message })
             toast({
               title: "Error al crear escena",
               description: newSceneError.message,
               variant: "destructive",
             })
-            return
+            return // Detener el guardado si hay un error
           }
 
-          console.log("New scene created with ID:", newScene.id)
+          // Actualizar el estado local con el nuevo ID de la escena persistida
+          // Esto es crucial para que las futuras operaciones no traten esta escena como temporal
+          setScenes((prevScenes) => prevScenes.map((s, idx) => (idx === i ? { ...newScene, is_temporary: false } : s)))
 
-          // Update the local state with the new scene ID
-          setScenes(scenes.map((s, idx) => (idx === i ? newScene : s)))
+          console.info("ProjectPage", "Escena creada con ID", { newId: newScene.id })
         } else {
-          // Validate that scene.id is a valid UUID for non-temporary scenes
+          // Validar ID de escena existente
           if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(scene.id)) {
-            console.error("Invalid scene ID:", scene.id)
+            console.error("ProjectPage", "ID de escena inválido", { sceneId: scene.id })
             toast({
               title: "Error",
               description: `ID de escena inválido: ${scene.id}. Por favor, contacta al soporte.`,
               variant: "destructive",
             })
-            return
+            return // Detener el guardado
           }
 
-          // If the scene is not temporary, update the existing scene in the database
-          console.log("Updating existing scene:", scene.id, "with order_index:", orderIndex)
+          // Actualizar escena existente
+          console.info("ProjectPage", "Actualizando escena existente", {
+            sceneId: scene.id,
+            orderIndex,
+          })
 
-          const { data: updatedScene, error: updateSceneError } = await supabase
+          const { error: updateSceneError } = await supabase
             .from("scenes")
             .update({
               title: scene.title || "Escena sin título",
               content: scene.content || "",
-              order_index: orderIndex, // Usar el índice calculado
+              order_index: orderIndex,
             })
             .eq("id", scene.id)
-            .select()
-            .single()
 
           if (updateSceneError) {
-            console.error("Error updating scene:", updateSceneError)
+            console.error("ProjectPage", "Error actualizando escena", { error: updateSceneError.message })
             toast({
               title: "Error al actualizar escena",
               description: updateSceneError.message,
               variant: "destructive",
             })
-            return
+            return // Detener el guardado
           }
         }
       }
 
-      // Actualizar el localStorage con los datos más recientes
-      localStorage.setItem(`storynema_scenes_${params.id}`, JSON.stringify(scenes))
-      localStorage.setItem(`storynema_last_update_time_${params.id}`, Date.now().toString())
+      // Después de guardar en la base de datos, actualizar el localStorage
+      // con el estado actual de `scenes` (que ya incluye los IDs persistidos)
+      saveScenesToLocalStorage(params.id, scenes)
 
+      console.info("ProjectPage", "Proyecto guardado exitosamente")
       toast({
         title: "Proyecto guardado",
         description: "Los cambios han sido guardados exitosamente.",
       })
-    } catch (error: any) {
-      console.error("Error saving project:", error)
+    } catch (error) {
+      console.error("ProjectPage", "Error guardando proyecto", { error: error.message }, error)
       toast({
         title: "Error al guardar el proyecto",
         description: error.message,
@@ -528,9 +510,9 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
                 <ScriptEditor
                   projectId={params.id}
                   scenes={scenes}
-                  setScenes={handleScenesUpdate}
+                  onScenesChange={handleScenesChange}
                   activeSceneIndex={activeSceneIndex}
-                  setActiveSceneIndex={handleSetActiveSceneIndex}
+                  onActiveSceneIndexChange={handleActiveSceneIndexChange}
                   generatedContent={generatedContent}
                   setGeneratedContent={setGeneratedContent}
                   aiSuggestions={aiSuggestions}
@@ -542,10 +524,10 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
                   projectId={params.id}
                   userId={userId || "anonymous"}
                   scenes={scenes}
-                  setScenes={setScenes}
-                  onScenesUpdate={handleScenesUpdate}
+                  setScenes={handleScenesChange} // StoryboardContainer también usa handleScenesChange
+                  onScenesUpdate={handleScenesChange} // Asegurar que ambos props apunten a la misma función
                   activeSceneIndex={activeSceneIndex}
-                  setActiveSceneIndex={setActiveSceneIndex}
+                  setActiveSceneIndex={handleActiveSceneIndexChange}
                 />
               </div>
               <div className={activeTab === "settings" ? "h-full" : "hidden"}>
