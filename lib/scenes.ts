@@ -163,3 +163,25 @@ export async function flipScenesOrder(projectId: string, sceneIds: string[]) {
     return { success: false, error: `Error al invertir escenas: ${error.message}` }
   }
 }
+
+// Function to delete a scene
+export async function deleteScene(sceneId: string, projectId: string) {
+  try {
+    const supabase = createClientComponentClient<Database>();
+    const { error } = await supabase
+      .from("scenes")
+      .delete()
+      .eq("id", sceneId)
+      .eq("project_id", projectId);
+
+    if (error) {
+      console.error("Error deleting scene:", error);
+      throw new Error(`Error al eliminar la escena: ${error.message}`);
+    }
+
+    return true;
+  } catch (error: any) {
+    console.error("Error in deleteScene:", error);
+    throw new Error(`Error al eliminar la escena: ${error.message}`);
+  }
+}

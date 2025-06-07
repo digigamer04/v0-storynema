@@ -454,8 +454,28 @@ export function ScriptEditor({
     }
   }
 
-  const deleteScene = (sceneId: string) => {
+  const deleteScene = async (sceneId: string) => {
     if (scenesArray.length <= 1) return
+
+    try {
+      const res = await fetch(
+        `/api/projects/${projectId}/scenes/${sceneId}`,
+        { method: "DELETE" },
+      )
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error || "No se pudo eliminar la escena")
+      }
+    } catch (error: any) {
+      console.error("Error deleting scene:", error)
+      toast({
+        title: "Error al eliminar escena",
+        description: error.message,
+        variant: "destructive",
+      })
+      return
+    }
+
     const updatedScenes = scenesArray.filter((s) => s.id !== sceneId)
     setScenesArray(updatedScenes)
 
