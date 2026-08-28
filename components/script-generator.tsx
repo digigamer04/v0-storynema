@@ -11,6 +11,7 @@ import { Loader2, Sparkles, RefreshCw, ArrowLeft, Save, AlertCircle } from "luci
 import { toast } from "@/components/ui/use-toast"
 import { useRouter } from "next/navigation"
 import { createClientSupabaseClient } from "@/lib/supabase"
+import { DEV_AUTH_BYPASS, getDevDemoUser } from "@/lib/auth"
 import {
   generateScript,
   regenerateScript,
@@ -47,11 +48,13 @@ export default function ScriptGenerator({ onCancel, onScriptCreated, onGeneratio
   const [currentParams, setCurrentParams] = useState<ScriptGenerationParams | null>(null)
   const [step, setStep] = useState<"form" | "preview">("form")
   const [error, setError] = useState<string | null>(null)
-  const [userId, setUserId] = useState<string | null>(null)
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false)
+  const [userId, setUserId] = useState<string | null>(DEV_AUTH_BYPASS ? getDevDemoUser().id : null)
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(DEV_AUTH_BYPASS)
 
   // Verificar autenticación al cargar el componente
   useEffect(() => {
+    if (DEV_AUTH_BYPASS) return
+
     const checkAuth = async () => {
       try {
         const supabase = createClientSupabaseClient()
@@ -62,10 +65,8 @@ export default function ScriptGenerator({ onCancel, onScriptCreated, onGeneratio
         if (session && session.user) {
           setUserId(session.user.id)
           setIsAuthenticated(true)
-          console.log("Usuario autenticado:", session.user.id)
         } else {
           setIsAuthenticated(false)
-          console.log("Usuario no autenticado")
         }
       } catch (error) {
         console.error("Error al verificar autenticación:", error)

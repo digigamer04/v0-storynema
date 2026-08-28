@@ -8,56 +8,24 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "El prompt es requerido" }, { status: 400 })
     }
 
-    // Obtener el token de Gemini del entorno
-    const apiKey = process.env.GEMINI_API_KEY
-
-    if (!apiKey) {
-      return NextResponse.json({ error: "API key de Gemini no configurada" }, { status: 500 })
+    // Usar Vercel AI Gateway: autentica automáticamente en el preview y evita
+    // depender de una clave Gemini directa que puede estar revocada o limitada.
+    const gatewayKey = process.env.AI_GATEWAY_API_KEY
+    if (!gatewayKey) {
+      return NextResponse.json({ error: "La conexión con la IA no está configurada" }, { status: 500 })
     }
 
-    // Usar la URL correcta de la API de Gemini
-    const apiUrl = `https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash-001:generateContent?key=${apiKey}`
-
-    // Llamada a la API de Gemini con el formato correcto
-    const response = await fetch(apiUrl, {
+    const response = await fetch("https://ai-gateway.vercel.sh/v1/chat/completions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        Authorization: `Bearer ${gatewayKey}`,
       },
       body: JSON.stringify({
-        contents: [
-          {
-            parts: [
-              {
-                text: prompt,
-              },
-            ],
-          },
-        ],
-        generationConfig: {
-          temperature: 0.7,
-          topK: 40,
-          topP: 0.95,
-          maxOutputTokens: 8192, // Aumentado para permitir guiones más largos
-        },
-        safetySettings: [
-          {
-            category: "HARM_CATEGORY_HARASSMENT",
-            threshold: "BLOCK_MEDIUM_AND_ABOVE",
-          },
-          {
-            category: "HARM_CATEGORY_HATE_SPEECH",
-            threshold: "BLOCK_MEDIUM_AND_ABOVE",
-          },
-          {
-            category: "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-            threshold: "BLOCK_MEDIUM_AND_ABOVE",
-          },
-          {
-            category: "HARM_CATEGORY_DANGEROUS_CONTENT",
-            threshold: "BLOCK_MEDIUM_AND_ABOVE",
-          },
-        ],
+        model: "google/gemini-2.5-flash",
+        messages: [{ role: "user", content: prompt }],
+        temperature: 0.7,
+        max_tokens: 8192,
       }),
     })
 
@@ -66,8 +34,7 @@ export async function POST(req: NextRequest) {
       console.error("Error de Gemini API:", errorData)
       return NextResponse.json(
         {
-          error: "Error al comunicarse con la API de Gemini",
-          details: errorData,
+          error: errorData?.error?.message || "Error al comunicarse con la API de Gemini",
         },
         { status: response.status },
       )
@@ -76,7 +43,7 @@ export async function POST(req: NextRequest) {
     const data = await response.json()
 
     // Extraer el texto generado de la respuesta
-    const generatedText = data.candidates?.[0]?.content?.parts?.[0]?.text || ""
+    const generatedText = data.choices?.[0]?.message?.content || ""
 
     return NextResponse.json({ text: generatedText })
   } catch (error) {
