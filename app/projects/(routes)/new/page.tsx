@@ -14,6 +14,7 @@ import { ArrowLeft, Loader2 } from "lucide-react"
 import Link from "next/link"
 import { toast } from "@/components/ui/use-toast"
 import { createClientSupabaseClient } from "@/lib/supabase"
+import { getUserClient } from "@/lib/auth"
 import ScriptGenerator from "@/components/script-generator"
 
 export default function NewProjectPage() {
@@ -24,30 +25,10 @@ export default function NewProjectPage() {
   const [activeTab, setActiveTab] = useState("blank")
   const [userId, setUserId] = useState<string | null>(null)
 
-  // Verificar autenticación
+  // En modo demo se usa una identidad estable sin bloquear la pantalla por login.
   useEffect(() => {
-    const checkAuth = async () => {
-      try {
-        const supabase = createClientSupabaseClient()
-        const {
-          data: { session },
-        } = await supabase.auth.getSession()
-
-        if (!session) {
-          console.error("No active session found")
-          router.push("/auth")
-          return
-        }
-
-        setUserId(session.user.id)
-      } catch (error) {
-        console.error("Error checking authentication:", error)
-        router.push("/auth")
-      }
-    }
-
-    checkAuth()
-  }, [router])
+    getUserClient().then((user) => setUserId(user?.id ?? null))
+  }, [])
 
   const handleCreateProject = async (e: React.FormEvent) => {
     e.preventDefault()

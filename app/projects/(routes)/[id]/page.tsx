@@ -12,6 +12,7 @@ import ProjectSettings from "@/components/project-settings"
 import GeminiIntegration from "@/components/gemini-integration"
 import { toast } from "@/components/ui/use-toast"
 import { createClientSupabaseClient } from "@/lib/supabase"
+import { getUserClient } from "@/lib/auth"
 import { cleanupProjectData } from "@/lib/project-isolation"
 import { projectCache, getCachedProject, isCacheLoading } from "@/lib/project-cache"
 
@@ -37,30 +38,10 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
   // Referencia para el intervalo de generación de sugerencias
   const suggestionsIntervalRef = useRef<NodeJS.Timeout | null>(null)
 
-  // Verificar autenticación
+  // En modo demo se usa una identidad estable sin bloquear la pantalla por login.
   useEffect(() => {
-    const checkAuth = async () => {
-      try {
-        const supabase = createClientSupabaseClient()
-        const {
-          data: { session },
-        } = await supabase.auth.getSession()
-
-        if (!session) {
-          console.error("No active session found")
-          router.push("/auth")
-          return
-        }
-
-        setUserId(session.user.id)
-      } catch (error) {
-        console.error("Error checking authentication:", error)
-        router.push("/auth")
-      }
-    }
-
-    checkAuth()
-  }, [router])
+    getUserClient().then((user) => setUserId(user?.id ?? null))
+  }, [])
 
   // Cargar proyecto en cache al inicializar
   useEffect(() => {

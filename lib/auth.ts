@@ -1,10 +1,36 @@
 import { redirect } from "next/navigation"
 import { createServerSupabaseClientWithCookies, createClientSupabaseClient } from "./supabase"
+import type { User } from "@supabase/supabase-js"
+
+// Activar solo temporalmente en desarrollo/pruebas. Restaurar auth con "false".
+export const DEV_AUTH_BYPASS = process.env.NEXT_PUBLIC_USE_DEV_ADMIN === "true"
+export const DEV_DEMO_USER_ID = "00000000-0000-4000-8000-000000000001"
+
+export function getDevDemoUser(): User {
+  return {
+    id: DEV_DEMO_USER_ID,
+    aud: "authenticated",
+    role: "authenticated",
+    email: "demo@storynema.local",
+    email_confirmed_at: new Date(0).toISOString(),
+    phone: "",
+    confirmed_at: new Date(0).toISOString(),
+    last_sign_in_at: new Date(0).toISOString(),
+    app_metadata: { provider: "email", providers: ["email"] },
+    user_metadata: { display_name: "Usuario demo" },
+    identities: [],
+    created_at: new Date(0).toISOString(),
+    updated_at: new Date(0).toISOString(),
+    is_anonymous: false,
+  } as User
+}
 
 // Funciones del lado del servidor
 // Obtener el usuario actual desde la sesión (solo para componentes del servidor)
 // Actualizar getUser para aceptar cookieStore
 export async function getUser(cookieStore?: any) {
+  if (DEV_AUTH_BYPASS) return getDevDemoUser()
+
   try {
     const supabase = createServerSupabaseClientWithCookies(cookieStore)
 
@@ -53,6 +79,8 @@ export async function isResourceOwner(userId: string, resourceUserId: string) {
 // Funciones del lado del cliente
 // Obtener el usuario actual desde la sesión (para componentes cliente)
 export async function getUserClient() {
+  if (DEV_AUTH_BYPASS) return getDevDemoUser()
+
   try {
     const supabase = createClientSupabaseClient()
     const { data, error } = await supabase.auth.getUser()

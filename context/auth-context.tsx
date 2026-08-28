@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react"
 import { createClientSupabaseClient } from "@/lib/supabase"
+import { DEV_AUTH_BYPASS, getDevDemoUser } from "@/lib/auth"
 import type { User } from "@supabase/supabase-js"
 
 type AuthContextType = {
@@ -16,14 +17,16 @@ type AuthContextType = {
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [user, setUser] = useState<User | null>(DEV_AUTH_BYPASS ? getDevDemoUser() : null)
+  const [loading, setLoading] = useState(!DEV_AUTH_BYPASS)
   const [error, setError] = useState<Error | null>(null)
 
   // Inicializar cliente de Supabase una vez
   const supabase = createClientSupabaseClient()
 
   useEffect(() => {
+    if (DEV_AUTH_BYPASS) return
+
     // Verificar si hay una sesión activa
     const checkSession = async () => {
       try {
@@ -125,7 +128,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, error, signIn, signUp, signOut }}>{children}</AuthContext.Provider>
+    <AuthContext.Provider value={{ user, loading, error, signIn, signUp, signOut }}>
+      {DEV_AUTH_BYPASS && (
+        <div className="fixed bottom-3 right-3 z-50 rounded-md border bg-background px-3 py-2 text-xs text-muted-foreground shadow-sm">
+          Modo demo activo · autenticación deshabilitada
+        </div>
+      )}
+      {children}
+    </AuthContext.Provider>
   )
 }
 
