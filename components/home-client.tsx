@@ -29,6 +29,8 @@ export default function HomeClient({
 
   // Cargar proyectos del usuario cuando se autentique
   useEffect(() => {
+    if (DEV_AUTH_BYPASS) return
+
     const loadUserProjects = async () => {
       if (!user) return
 
@@ -91,7 +93,8 @@ export default function HomeClient({
                 <Link href="/projects-manage">Gestionar Proyectos</Link>
               </Button>
             </div>
-            {!DEV_AUTH_BYPASS && <Button
+            {!DEV_AUTH_BYPASS ? (
+              <Button
               variant="ghost"
               onClick={async () => {
                 try {
@@ -104,7 +107,8 @@ export default function HomeClient({
               className="text-red-500 hover:text-red-700 hover:bg-red-100"
             >
               Cerrar Sesión
-            </Button>}
+              </Button>
+            ) : null}
           </div>
         ) : (
           <Button asChild size="lg">
