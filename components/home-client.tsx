@@ -7,6 +7,7 @@ import { ProjectCard } from "@/components/project-card"
 import { ChevronDown, Plus, Loader2 } from "lucide-react"
 import { useState, useEffect } from "react"
 import { useAuth } from "@/context/auth-context"
+import { DEV_AUTH_BYPASS } from "@/lib/auth"
 import { createClientSupabaseClient } from "@/lib/supabase"
 
 interface HomeClientProps {
@@ -90,7 +91,7 @@ export default function HomeClient({
                 <Link href="/projects-manage">Gestionar Proyectos</Link>
               </Button>
             </div>
-            <Button
+            {!DEV_AUTH_BYPASS && <Button
               variant="ghost"
               onClick={async () => {
                 try {
@@ -103,7 +104,7 @@ export default function HomeClient({
               className="text-red-500 hover:text-red-700 hover:bg-red-100"
             >
               Cerrar Sesión
-            </Button>
+            </Button>}
           </div>
         ) : (
           <Button asChild size="lg">

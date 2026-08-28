@@ -3,7 +3,9 @@ import { createServerSupabaseClientWithCookies, createClientSupabaseClient } fro
 import type { User } from "@supabase/supabase-js"
 
 // Activar solo temporalmente en desarrollo/pruebas. Restaurar auth con "false".
-export const DEV_AUTH_BYPASS = process.env.NEXT_PUBLIC_USE_DEV_ADMIN === "true"
+export const DEV_AUTH_BYPASS = ["true", "admin", "1"].includes(
+  process.env.NEXT_PUBLIC_USE_DEV_ADMIN?.trim().toLowerCase() ?? "",
+)
 export const DEV_DEMO_USER_ID = "00000000-0000-4000-8000-000000000001"
 
 export function getDevDemoUser(): User {
@@ -69,7 +71,7 @@ export async function requireAuth() {
 // Verificar si el usuario es propietario del recurso
 export async function isResourceOwner(userId: string, resourceUserId: string) {
   // Si el usuario es administrador, permitir acceso
-  if (process.env.NEXT_PUBLIC_USE_DEV_ADMIN === "true") {
+  if (DEV_AUTH_BYPASS) {
     return true
   }
 
