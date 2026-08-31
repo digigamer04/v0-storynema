@@ -8,26 +8,26 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "El prompt es requerido" }, { status: 400 })
     }
 
-    // Usar la clave de Gemini únicamente en el servidor. Nunca se expone al navegador.
-    const apiKey = process.env.GCP_API_KEY || process.env.GEMINI_API_KEY
-    if (!apiKey) {
-      return NextResponse.json({ error: "La conexión con Gemini no está configurada" }, { status: 500 })
+    // AI Gateway gestiona la autenticación del preview/deployment.
+    // Se usa un modelo explícitamente gratuito para no requerir tarjeta.
+    const gatewayKey = process.env.AI_GATEWAY_API_KEY
+    if (!gatewayKey) {
+      return NextResponse.json({ error: "AI Gateway no está configurado para este proyecto" }, { status: 500 })
     }
 
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(apiKey)}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: {
-            temperature: 0.7,
-            maxOutputTokens: 8192,
-          },
-        }),
+    const response = await fetch("https://ai-gateway.vercel.sh/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${gatewayKey}`,
       },
-    )
+      body: JSON.stringify({
+        model: "minimax/minimax-m2.7-free",
+        messages: [{ role: "user", content: prompt }],
+        temperature: 0.7,
+        max_tokens: 8192,
+      }),
+    })
 
     if (!response.ok) {
       const errorData = await response.json()
@@ -43,7 +43,7 @@ export async function POST(req: NextRequest) {
     const data = await response.json()
 
     // Extraer el texto generado de la respuesta
-    const generatedText = data.candidates?.[0]?.content?.parts?.map((part: { text?: string }) => part.text || "").join("") || ""
+    const generatedText = data.choices?.[0]?.message?.content || ""
 
     if (!generatedText) {
       return NextResponse.json({ error: "Gemini no devolvió contenido" }, { status: 502 })
