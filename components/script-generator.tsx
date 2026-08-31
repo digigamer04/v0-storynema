@@ -231,12 +231,7 @@ export default function ScriptGenerator({ onCancel, onScriptCreated, onGeneratio
       // Asegurarnos de que la redirección funcione correctamente
       console.log("Redirigiendo a:", `/projects/${projectId}`)
 
-      // Forzar la redirección con un pequeño retraso para asegurar que todo se ha guardado
-      setTimeout(() => {
-        router.push(`/projects/${projectId}`)
-      }, 500)
-
-      // También intentamos la redirección inmediata
+      // Una única navegación evita carreras entre dos router.push().
       router.push(`/projects/${projectId}`)
 
       // Si hay un callback, también lo llamamos

@@ -34,7 +34,8 @@ export async function POST(request: NextRequest) {
     // Establecer valores por defecto
     projectData.created_at = new Date().toISOString()
     projectData.updated_at = new Date().toISOString()
-    projectData.status = projectData.status || "active"
+    // `status` no existe en el esquema actual de projects; no lo enviamos.
+    delete projectData.status
 
     console.log("Creating project with data:", projectData)
 
@@ -72,6 +73,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ...data, scenes_created: scenes.length })
   } catch (error: any) {
     console.error("Error in create project API:", error)
-    return NextResponse.json({ error: `Error al crear el proyecto: ${error.message}` }, { status: 500 })
+    const message = error?.message === "fetch failed"
+      ? "No se pudo conectar con Supabase. La base de datos puede estar temporalmente inaccesible."
+      : `Error al crear el proyecto: ${error?.message || "Error desconocido"}`
+    return NextResponse.json({ error: message }, { status: 503 })
   }
 }
