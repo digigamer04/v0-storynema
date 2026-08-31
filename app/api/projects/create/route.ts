@@ -14,7 +14,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Obtener datos del proyecto
-    const projectData = await request.json()
+    const { scenes: requestedScenes, ...projectData } = await request.json()
 
     // Validar datos
     if (!projectData.title) {
@@ -48,7 +48,28 @@ export async function POST(request: NextRequest) {
     }
 
     console.log("Project created successfully:", data.id)
-    return NextResponse.json(data)
+
+    // Crear todas las escenas en el servidor, usando el cliente privilegiado.
+    // Esto también permite que el modo demo funcione sin depender de RLS del navegador.
+    const scenes = Array.isArray(requestedScenes) ? requestedScenes : []
+    if (scenes.length > 0) {
+      const sceneRows = scenes.map((scene: { title?: string; content?: string }, index: number) => ({
+        project_id: data.id,
+        title: scene.title || `ESCENA ${index + 1}`,
+        content: scene.content || "",
+        order_index: index,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }))
+
+      const { error: scenesError } = await supabase.from("scenes").insert(sceneRows)
+      if (scenesError) {
+        await supabase.from("projects").delete().eq("id", data.id)
+        return NextResponse.json({ error: `Error al crear las escenas: ${scenesError.message}` }, { status: 500 })
+      }
+    }
+
+    return NextResponse.json({ ...data, scenes_created: scenes.length })
   } catch (error: any) {
     console.error("Error in create project API:", error)
     return NextResponse.json({ error: `Error al crear el proyecto: ${error.message}` }, { status: 500 })

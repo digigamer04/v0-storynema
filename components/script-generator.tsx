@@ -203,112 +203,25 @@ export default function ScriptGenerator({ onCancel, onScriptCreated, onGeneratio
     setIsGenerating(true)
 
     try {
-      // Crear cliente de Supabase directamente
-      const supabase = createClientSupabaseClient()
+      // La creación completa ocurre en el servidor para evitar fallos de RLS y CORS.
+      const response = await fetch("/api/projects/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: title || "Proyecto sin título",
+          description,
+          user_id: userId,
+          scenes: generatedScript.scenes,
+        }),
+      })
 
-      // PASO 1: Crear el proyecto directamente con Supabase
-      const projectData = {
-        title: title || "Proyecto sin título",
-        description: description,
-        user_id: userId,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
+      const result = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        throw new Error(result.error || `Error al crear el proyecto (${response.status})`)
       }
 
-      console.log("Creando proyecto directamente con Supabase...", projectData)
-
-      // Insertar el proyecto
-      const { data: project, error: projectError } = await supabase
-        .from("projects")
-        .insert([projectData])
-        .select()
-        .single()
-
-      if (projectError) {
-        console.error("Error al crear proyecto:", projectError)
-        throw new Error(`Error al crear el proyecto: ${projectError.message}`)
-      }
-
-      if (!project) {
-        throw new Error("No se pudo crear el proyecto")
-      }
-
+      const project = result
       const projectId = project.id
-      console.log("Proyecto creado con ID:", projectId)
-
-      // PASO 2: Crear las escenas una por una directamente con Supabase
-      // IMPORTANTE: Invertimos el array de escenas para asegurar que se creen en el orden correcto
-      // Esto es necesario porque la IA a veces genera las escenas en orden inverso
-      const scenesToCreate = [...generatedScript.scenes].reverse()
-      console.log(`Creando ${scenesToCreate.length} escenas en orden inverso para mantener la secuencia correcta`)
-      console.log(`Orden de escenas después de invertir: ${scenesToCreate.map((s) => s.title).join(" -> ")}`)
-
-      for (let i = 0; i < scenesToCreate.length; i++) {
-        const scene = scenesToCreate[i]
-        // El índice de orden debe ser inverso al índice del array invertido
-        // para que la primera escena tenga el índice más bajo
-        const orderIndex = scenesToCreate.length - 1 - i
-
-        // Extraer metadatos adicionales de la escena (ubicación, tiempo)
-        const locationMatch = scene.title.match(
-          /(INTERIOR|EXTERIOR)\.\s*(.*?)\s*-\s*(DÍA|NOCHE|TARDE|AMANECER|ATARDECER)/i,
-        )
-
-        const sceneData = {
-          project_id: projectId,
-          title: scene.title,
-          content: scene.content,
-          order_index: orderIndex, // Usamos el índice invertido para mantener el orden correcto
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        }
-        console.log(`Creando escena con order_index ${orderIndex}: ${scene.title}`)
-
-        // Insertar la escena directamente
-        const { data: sceneData2, error: sceneError } = await supabase
-          .from("scenes")
-          .insert([sceneData])
-          .select()
-          .single()
-
-        if (sceneError) {
-          console.error(`Error al crear escena ${i + 1}:`, sceneError)
-          // Continuamos con las demás escenas incluso si una falla
-          continue
-        }
-
-        // Si tenemos metadatos y la escena se creó correctamente, los guardamos en la tabla scene_metadata
-        if (locationMatch && sceneData2) {
-          const metadataData = {
-            scene_id: sceneData2.id,
-            camera: locationMatch[1].toLowerCase() === "interior" ? "Interior" : "Exterior",
-            lighting: locationMatch[3].toLowerCase().includes("día") ? "Natural" : "Artificial",
-            location: locationMatch[2].trim(),
-            duration: "00:02:00", // Duración predeterminada de 2 minutos
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          }
-
-          const { error: metadataError } = await supabase.from("scene_metadata").insert([metadataData])
-
-          if (metadataError) {
-            console.error(`Error al crear metadatos para escena ${i + 1}:`, metadataError)
-            // Continuamos aunque falle la creación de metadatos
-          }
-        }
-      }
-
-      // Verificar el orden final de las escenas
-      const { data: finalScenes } = await supabase
-        .from("scenes")
-        .select("title, order_index")
-        .eq("project_id", projectId)
-        .order("order_index", { ascending: true })
-
-      console.log(
-        "Orden final de escenas en la base de datos:",
-        finalScenes?.map((s) => `${s.order_index}: ${s.title}`).join(" -> "),
-      )
 
       toast({
         title: "Proyecto creado",
