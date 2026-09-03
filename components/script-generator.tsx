@@ -12,6 +12,7 @@ import { toast } from "@/components/ui/use-toast"
 import { useRouter } from "next/navigation"
 import { createClientSupabaseClient } from "@/lib/supabase"
 import { DEV_AUTH_BYPASS, getDevDemoUser } from "@/lib/auth"
+import { createLocalProjectId, createLocalSceneId, saveLocalProject } from "@/lib/indexeddb"
 import {
   generateScript,
   regenerateScript,
@@ -203,6 +204,33 @@ export default function ScriptGenerator({ onCancel, onScriptCreated, onGeneratio
     setIsGenerating(true)
 
     try {
+      if (DEV_AUTH_BYPASS) {
+        const now = new Date().toISOString()
+        const projectId = createLocalProjectId()
+        await saveLocalProject({
+          id: projectId,
+          title: title || "Proyecto sin título",
+          description,
+          user_id: userId,
+          created_at: now,
+          updated_at: now,
+          scenes: generatedScript.scenes.map((scene, index) => ({
+            id: createLocalSceneId(),
+            project_id: projectId,
+            title: scene.title,
+            content: scene.content,
+            order_index: index,
+            created_at: now,
+            updated_at: now,
+          })),
+          storyboard: { scenes: [], metadata: {}, settings: {} },
+        })
+        toast({ title: "Proyecto creado", description: "Guardado localmente en este navegador." })
+        router.push(`/projects/${projectId}`)
+        onScriptCreated?.(generatedScript.scenes)
+        return
+      }
+
       // La creación completa ocurre en el servidor para evitar fallos de RLS y CORS.
       const response = await fetch("/api/projects/create", {
         method: "POST",

@@ -15,6 +15,7 @@ import { createClientSupabaseClient } from "@/lib/supabase"
 import { getUserClient } from "@/lib/auth"
 import { cleanupProjectData } from "@/lib/project-isolation"
 import { projectCache, getCachedProject, isCacheLoading } from "@/lib/project-cache"
+import { getLocalProject, isLocalProjectId } from "@/lib/indexeddb"
 
 export default function ProjectPage({ params }: { params: { id: string } }) {
   const router = useRouter()
@@ -53,6 +54,16 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
         setError(null)
 
         console.log("Cargando proyecto:", params.id)
+
+        if (isLocalProjectId(params.id)) {
+          const localProject = await getLocalProject(params.id)
+          if (!localProject) throw new Error("Proyecto local no encontrado")
+          setProjectTitle(localProject.title)
+          setScenes(localProject.scenes)
+          setStoryboardData(localProject.storyboard || { scenes: [], metadata: {}, settings: {} })
+          setIsLoading(false)
+          return
+        }
 
         // Establecer como proyecto activo
         projectCache.setActiveProject(params.id)

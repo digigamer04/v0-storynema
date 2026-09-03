@@ -16,6 +16,8 @@ import { toast } from "@/components/ui/use-toast"
 import { createClientSupabaseClient } from "@/lib/supabase"
 import { getUserClient } from "@/lib/auth"
 import ScriptGenerator from "@/components/script-generator"
+import { DEV_AUTH_BYPASS } from "@/lib/auth"
+import { createLocalProjectId, saveLocalProject } from "@/lib/indexeddb"
 
 export default function NewProjectPage() {
   const router = useRouter()
@@ -58,6 +60,15 @@ export default function NewProjectPage() {
       console.log("Creating new project:", title)
 
       // Crear proyecto directamente con Supabase
+      if (DEV_AUTH_BYPASS) {
+        const now = new Date().toISOString()
+        const id = createLocalProjectId()
+        await saveLocalProject({ id, title: title.trim(), description: description.trim(), user_id: userId, created_at: now, updated_at: now, scenes: [], storyboard: { scenes: [], metadata: {}, settings: {} } })
+        toast({ title: "Proyecto creado", description: "Guardado localmente en este navegador." })
+        router.push(`/projects/${id}`)
+        return
+      }
+
       const supabase = createClientSupabaseClient()
       const { data: newProject, error } = await supabase
         .from("projects")
