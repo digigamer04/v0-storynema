@@ -1,173 +1,44 @@
 import { redirect } from "next/navigation"
-import { createServerSupabaseClientWithCookies, createClientSupabaseClient } from "./supabase"
-import type { User } from "@supabase/supabase-js"
 
-// Activar solo temporalmente en desarrollo/pruebas. Restaurar auth con "false".
-export const DEV_AUTH_BYPASS = ["true", "admin", "1"].includes(
-  process.env.NEXT_PUBLIC_USE_DEV_ADMIN?.trim().toLowerCase() ?? "",
-)
-export const DEV_DEMO_USER_ID = "00000000-0000-4000-8000-000000000001"
+export const DEV_AUTH_BYPASS = true
+export const DEV_DEMO_USER_ID = "local-demo-user"
 
-export function getDevDemoUser(): User {
-  return {
-    id: DEV_DEMO_USER_ID,
-    aud: "authenticated",
-    role: "authenticated",
-    email: "demo@storynema.local",
-    email_confirmed_at: new Date(0).toISOString(),
-    phone: "",
-    confirmed_at: new Date(0).toISOString(),
-    last_sign_in_at: new Date(0).toISOString(),
-    app_metadata: { provider: "email", providers: ["email"] },
-    user_metadata: { display_name: "Usuario demo" },
-    identities: [],
-    created_at: new Date(0).toISOString(),
-    updated_at: new Date(0).toISOString(),
-    is_anonymous: false,
-  } as User
+export type LocalUser = {
+  id: string
+  email: string
+  user_metadata: { display_name: string }
 }
 
-// Funciones del lado del servidor
-// Obtener el usuario actual desde la sesión (solo para componentes del servidor)
-// Actualizar getUser para aceptar cookieStore
-export async function getUser(cookieStore?: any) {
-  if (DEV_AUTH_BYPASS) return getDevDemoUser()
-
-  try {
-    const supabase = createServerSupabaseClientWithCookies(cookieStore)
-
-    const {
-      data: { session },
-      error,
-    } = await supabase.auth.getSession()
-
-    if (error) {
-      console.error("Error al obtener la sesión:", error.message)
-      return null
-    }
-
-    if (!session) {
-      return null
-    }
-
-    return session.user
-  } catch (error) {
-    console.error("Error en getUser:", error)
-    return null
-  }
+export function getDevDemoUser(): LocalUser {
+  return { id: DEV_DEMO_USER_ID, email: "demo@storynema.local", user_metadata: { display_name: "Usuario demo" } }
 }
 
-// Verificar si el usuario está autenticado (solo para componentes del servidor)
+export async function getUser(_cookieStore?: unknown) {
+  return getDevDemoUser()
+}
+
 export async function requireAuth() {
   const user = await getUser()
-
-  if (!user) {
-    redirect("/auth")
-  }
-
+  if (!user) redirect("/auth")
   return user
 }
 
-// Verificar si el usuario es propietario del recurso
 export async function isResourceOwner(userId: string, resourceUserId: string) {
-  // Si el usuario es administrador, permitir acceso
-  if (DEV_AUTH_BYPASS) {
-    return true
-  }
-
-  return userId === resourceUserId
+  return userId === resourceUserId || resourceUserId === DEV_DEMO_USER_ID
 }
 
-// Funciones del lado del cliente
-// Obtener el usuario actual desde la sesión (para componentes cliente)
 export async function getUserClient() {
-  if (DEV_AUTH_BYPASS) return getDevDemoUser()
-
-  try {
-    const supabase = createClientSupabaseClient()
-    const { data, error } = await supabase.auth.getUser()
-
-    if (error) {
-      console.error("Error getting user:", error.message)
-      return null
-    }
-
-    return data.user
-  } catch (error) {
-    console.error("Error in getUserClient:", error)
-    return null
-  }
+  return getDevDemoUser()
 }
 
-// Función para iniciar sesión
-// Modificar la función signIn para aceptar el parámetro rememberMe
-export async function signIn(email: string, password: string, rememberMe = false) {
-  try {
-    const supabase = createClientSupabaseClient()
-
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-      options: {
-        // Configurar la persistencia de la sesión según la opción rememberMe
-        // Si rememberMe es true, la sesión persistirá incluso después de cerrar el navegador
-        // Si es false, la sesión se eliminará al cerrar el navegador
-        persistSession: rememberMe,
-      },
-    })
-
-    if (error) {
-      console.error("Error al iniciar sesión:", error.message)
-      throw error
-    }
-
-    return data
-  } catch (error) {
-    console.error("Error en signIn:", error)
-    throw error
-  }
+export async function signIn() {
+  return { user: getDevDemoUser() }
 }
 
-// Función para registrarse
-export async function signUp(email: string, password: string) {
-  try {
-    const supabase = createClientSupabaseClient()
-
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
-      },
-    })
-
-    if (error) {
-      console.error("Error al registrarse:", error.message)
-      throw error
-    }
-
-    return data
-  } catch (error) {
-    console.error("Error en signUp:", error)
-    throw error
-  }
+export async function signUp() {
+  return { user: getDevDemoUser() }
 }
 
-// Función para cerrar sesión
 export async function signOut() {
-  try {
-    const supabase = createClientSupabaseClient()
-
-    const { error } = await supabase.auth.signOut()
-
-    if (error) {
-      console.error("Error al cerrar sesión:", error.message)
-      throw error
-    }
-
-    return true
-  } catch (error) {
-    console.error("Error en signOut:", error)
-    throw error
-  }
+  return true
 }

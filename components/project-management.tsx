@@ -34,6 +34,7 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { toast } from "@/components/ui/use-toast"
 import { createClientSupabaseClient } from "@/lib/supabase"
+import { deleteLocalProject, listLocalProjects, isLocalProjectId } from "@/lib/indexeddb"
 
 interface ProjectManagementProps {
   userId: string
@@ -70,20 +71,8 @@ export default function ProjectManagement({ userId }: ProjectManagementProps) {
         setIsLoading(true)
         setError(null)
 
-        // Usar directamente el cliente de Supabase
-        const supabase = createClientSupabaseClient()
-        const { data, error: supabaseError } = await supabase
-          .from("projects")
-          .select("*")
-          .eq("user_id", userId)
-          .order("updated_at", { ascending: false })
-
-        if (supabaseError) {
-          throw supabaseError
-        }
-
-        console.log("Loaded projects:", data)
-        setProjects(data || [])
+        const data = await listLocalProjects(userId)
+        setProjects(data)
       } catch (err) {
         console.error("Error loading projects:", err)
         setError("Error loading projects. Please try again.")
@@ -155,12 +144,10 @@ export default function ProjectManagement({ userId }: ProjectManagementProps) {
     try {
       setIsProcessing(true)
 
-      // Usar directamente el cliente de Supabase
-      const supabase = createClientSupabaseClient()
-      const { error } = await supabase.from("projects").delete().eq("id", projectToDelete.id)
-
-      if (error) {
-        throw error
+      if (isLocalProjectId(projectToDelete.id)) {
+        await deleteLocalProject(projectToDelete.id)
+      } else {
+        throw new Error("Los proyectos remotos ya no están disponibles")
       }
 
       // Actualizar la lista de proyectos

@@ -13,8 +13,8 @@ import { Textarea } from "@/components/ui/textarea"
 import { ArrowLeft, Loader2 } from "lucide-react"
 import Link from "next/link"
 import { toast } from "@/components/ui/use-toast"
-import { createClientSupabaseClient } from "@/lib/supabase"
 import { getUserClient } from "@/lib/auth"
+import { createLocalProjectId, saveLocalProject } from "@/lib/indexeddb"
 import ScriptGenerator from "@/components/script-generator"
 
 export default function NewProjectPage() {
@@ -57,36 +57,11 @@ export default function NewProjectPage() {
 
       console.log("Creating new project:", title)
 
-      // Crear proyecto directamente con Supabase
-      // Eliminamos el campo 'status' ya que no existe en la tabla
-      const supabase = createClientSupabaseClient()
-      const { data: newProject, error } = await supabase
-        .from("projects")
-        .insert([
-          {
-            title,
-            description,
-            user_id: userId,
-            // Eliminamos el campo status que causa el error
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          },
-        ])
-        .select()
-        .single()
-
-      if (error) {
-        throw error
-      }
-
-      console.log("Project created successfully:", newProject.id)
-      toast({
-        title: "Proyecto creado",
-        description: "El proyecto se ha creado correctamente",
-      })
-
-      // Redirigir al nuevo proyecto
-      router.push(`/projects/${newProject.id}`)
+      const now = new Date().toISOString()
+      const id = createLocalProjectId()
+      await saveLocalProject({ id, title: title.trim(), description: description.trim(), user_id: userId, created_at: now, updated_at: now, scenes: [], storyboard: { scenes: [], metadata: {}, settings: {} } })
+      toast({ title: "Proyecto creado", description: "Guardado localmente en este navegador." })
+      router.push(`/projects/${id}`)
     } catch (error: any) {
       console.error("Error creating project:", error)
       toast({

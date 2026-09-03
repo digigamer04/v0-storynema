@@ -15,7 +15,7 @@ import { createClientSupabaseClient } from "@/lib/supabase"
 import { getUserClient } from "@/lib/auth"
 import { cleanupProjectData } from "@/lib/project-isolation"
 import { projectCache, getCachedProject, isCacheLoading } from "@/lib/project-cache"
-import { getLocalProject, isLocalProjectId } from "@/lib/indexeddb"
+import { getLocalProject, isLocalProjectId, updateLocalProject } from "@/lib/indexeddb"
 
 export default function ProjectPage({ params }: { params: { id: string } }) {
   const router = useRouter()
@@ -250,6 +250,12 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
   // Function to save the project
   const saveProject = async () => {
     try {
+      if (isLocalProjectId(params.id)) {
+        await updateLocalProject(params.id, { scenes, storyboard: storyboardData || undefined, title: projectTitle })
+        toast({ title: "Proyecto guardado", description: "Cambios guardados localmente." })
+        return
+      }
+
       const supabase = createClientSupabaseClient()
 
       // Iterate through the scenes and update them in the database

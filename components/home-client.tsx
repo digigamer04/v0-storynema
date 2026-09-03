@@ -8,7 +8,7 @@ import { ChevronDown, Plus, Loader2 } from "lucide-react"
 import { useState, useEffect } from "react"
 import { useAuth } from "@/context/auth-context"
 import { DEV_AUTH_BYPASS } from "@/lib/auth"
-import { createClientSupabaseClient } from "@/lib/supabase"
+import { listLocalProjects } from "@/lib/indexeddb"
 
 interface HomeClientProps {
   userProjects?: any[]
@@ -36,19 +36,8 @@ export default function HomeClient({
 
       try {
         setIsLoading(true)
-        const supabase = createClientSupabaseClient()
-
-        const { data, error: supabaseError } = await supabase
-          .from("projects")
-          .select("*")
-          .eq("user_id", user.id)
-          .order("updated_at", { ascending: false })
-
-        if (supabaseError) {
-          throw supabaseError
-        }
-
-        setProjects(data || [])
+        const data = await listLocalProjects(user.id)
+        setProjects(data)
       } catch (err) {
         console.error("Error loading user projects:", err)
         setError("Error al cargar tus proyectos")

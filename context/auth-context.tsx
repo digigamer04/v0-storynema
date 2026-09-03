@@ -1,9 +1,9 @@
 "use client"
 
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react"
-import { createClientSupabaseClient } from "@/lib/supabase"
-import { DEV_AUTH_BYPASS, getDevDemoUser } from "@/lib/auth"
-import type { User } from "@supabase/supabase-js"
+import { createContext, useContext, useState, type ReactNode } from "react"
+import { getDevDemoUser } from "@/lib/auth"
+
+export type User = { id: string; email?: string; user_metadata?: Record<string, unknown> }
 
 type AuthContextType = {
   user: User | null
@@ -17,123 +17,18 @@ type AuthContextType = {
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(DEV_AUTH_BYPASS ? getDevDemoUser() : null)
-  const [loading, setLoading] = useState(!DEV_AUTH_BYPASS)
+  const [user, setUser] = useState<User | null>(getDevDemoUser())
   const [error, setError] = useState<Error | null>(null)
 
-  // Inicializar cliente de Supabase una vez
-  const supabase = createClientSupabaseClient()
-
-  useEffect(() => {
-    if (DEV_AUTH_BYPASS) return
-
-    // Verificar si hay una sesión activa
-    const checkSession = async () => {
-      try {
-        const {
-          data: { session },
-          error: sessionError,
-        } = await supabase.auth.getSession()
-
-        if (sessionError) {
-          throw sessionError
-        }
-
-        setUser(session?.user || null)
-      } catch (err) {
-        console.error("Error checking session:", err)
-        setError(err instanceof Error ? err : new Error("Error en la autenticación"))
-      } finally {
-        setLoading(false)
-      }
-    }
-
-    checkSession()
-
-    // Suscribirse a cambios en la autenticación
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user || null)
-    })
-
-    // Limpiar suscripción
-    return () => {
-      subscription.unsubscribe()
-    }
-  }, [])
-
-  // Modificar la función signIn en el contexto para aceptar el parámetro rememberMe
-  const signIn = async (email: string, password: string, rememberMe = false) => {
-    try {
-      setLoading(true)
-      const { error: signInError } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-        options: {
-          persistSession: rememberMe,
-        },
-      })
-
-      if (signInError) {
-        throw signInError
-      }
-    } catch (err) {
-      console.error("Error signing in:", err)
-      setError(err instanceof Error ? err : new Error("Error al iniciar sesión"))
-      throw err
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const signUp = async (email: string, password: string) => {
-    try {
-      setLoading(true)
-      const { error: signUpError } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          emailRedirectTo: `${window.location.origin}/auth/callback`,
-        },
-      })
-
-      if (signUpError) {
-        throw signUpError
-      }
-    } catch (err) {
-      console.error("Error signing up:", err)
-      setError(err instanceof Error ? err : new Error("Error al registrarse"))
-      throw err
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const signOut = async () => {
-    try {
-      setLoading(true)
-      const { error: signOutError } = await supabase.auth.signOut()
-
-      if (signOutError) {
-        throw signOutError
-      }
-    } catch (err) {
-      console.error("Error signing out:", err)
-      setError(err instanceof Error ? err : new Error("Error al cerrar sesión"))
-      throw err
-    } finally {
-      setLoading(false)
-    }
-  }
+  const signIn = async () => setUser(getDevDemoUser())
+  const signUp = async () => setUser(getDevDemoUser())
+  const signOut = async () => setUser(null)
 
   return (
-    <AuthContext.Provider value={{ user, loading, error, signIn, signUp, signOut }}>
-      {DEV_AUTH_BYPASS && (
-        <div className="fixed bottom-3 right-3 z-50 rounded-md border bg-background px-3 py-2 text-xs text-muted-foreground shadow-sm">
-          Modo demo activo · autenticación deshabilitada
-        </div>
-      )}
+    <AuthContext.Provider value={{ user, loading: false, error, signIn, signUp, signOut }}>
+      <div className="fixed bottom-3 right-3 z-50 rounded-md border bg-background px-3 py-2 text-xs text-muted-foreground shadow-sm">
+        Modo local activo · IndexedDB
+      </div>
       {children}
     </AuthContext.Provider>
   )
@@ -141,8 +36,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
 export function useAuth() {
   const context = useContext(AuthContext)
-  if (context === undefined) {
-    throw new Error("useAuth debe usarse dentro de un AuthProvider")
-  }
+  if (!context) throw new Error("useAuth debe usarse dentro de un AuthProvider")
   return context
 }
