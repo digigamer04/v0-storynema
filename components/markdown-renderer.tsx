@@ -8,7 +8,11 @@ interface MarkdownRendererProps {
 }
 
 const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content }) => {
-  return <ReactMarkdown className="prose prose-invert max-w-none">{content}</ReactMarkdown>
+  return (
+    <div className="prose prose-invert max-w-none">
+      <ReactMarkdown>{content}</ReactMarkdown>
+    </div>
+  )
 }
 
 export default MarkdownRenderer
